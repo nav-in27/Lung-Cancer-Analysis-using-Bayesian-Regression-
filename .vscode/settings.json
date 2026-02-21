@@ -1,0 +1,7 @@
+{
+  "r.rpath.windows": "C:\\Program Files\\R\\R-4.5.2\\bin\\x64\\R.exe",
+  "r.rterm.windows": "C:\\Program Files\\R\\R-4.5.2\\bin\\x64\\R.exe",
+  "terminal.integrated.env.windows": {
+    "R_LIBS_USER": "C:\\Users\\navee\\AppData\\Local\\R\\win-library\\4.5;C:\\Users\\navee\\Documents\\R\\win-library\\4.5"
+  }
+}

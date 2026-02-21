@@ -1,0 +1,10 @@
+*.log
+*.rds
+datasets_archive/
+__pycache__/
+.vscode/
+
+# React Vite
+node_modules/
+dist/
+.env*

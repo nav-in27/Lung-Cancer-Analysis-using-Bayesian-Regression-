@@ -1,0 +1,69 @@
+
+============================================================
+ Initializing Bayesian Lung Cancer Application
+============================================================
+
+Starting R Plumber API on port 8000...
+Waiting 3 seconds for statistical libraries to load...
+
+[BACKEND R-API] 
+[BACKEND R-API] Attaching package: 'bslib'
+[BACKEND R-API] 
+[BACKEND R-API] The following object is masked from 'package:utils':
+[BACKEND R-API] 
+[BACKEND R-API]     page
+[BACKEND R-API] 
+[BACKEND R-API] 
+[BACKEND R-API] Attaching package: 'plotly'
+[BACKEND R-API] 
+[BACKEND R-API] The following object is masked from 'package:ggplot2':
+[BACKEND R-API] 
+[BACKEND R-API]     last_plot
+[BACKEND R-API] 
+[BACKEND R-API] The following object is masked from 'package:stats':
+[BACKEND R-API] 
+[BACKEND R-API]     filter
+[BACKEND R-API] 
+[BACKEND R-API] The following object is masked from 'package:graphics':
+[BACKEND R-API] 
+[BACKEND R-API]     layout
+[BACKEND R-API] 
+[BACKEND R-API] 
+[BACKEND R-API] Attaching package: 'dplyr'
+[BACKEND R-API] 
+[BACKEND R-API] The following objects are masked from 'package:stats':
+[BACKEND R-API] 
+[BACKEND R-API]     filter, lag
+[BACKEND R-API] 
+[BACKEND R-API] The following objects are masked from 'package:base':
+[BACKEND R-API] 
+[BACKEND R-API]     intersect, setdiff, setequal, union
+[BACKEND R-API] 
+[BACKEND R-API] 
+[BACKEND R-API] Attaching package: 'DT'
+[BACKEND R-API] 
+[BACKEND R-API] The following objects are masked from 'package:shiny':
+[BACKEND R-API] 
+[BACKEND R-API]     dataTableOutput, renderDataTable
+[BACKEND R-API] 
+[BACKEND R-API] Running plumber API at http://127.0.0.1:8000
+[BACKEND R-API] Running swagger Docs at http://127.0.0.1:8000/__docs__/
+Starting React Frontend...
+============================================================
+
+ SUCCESS: Dual Environments are spinning up!
+ Backend API  -> http://127.0.0.1:8000/predict
+ Frontend App -> Usually http://localhost:5173 (Check logs below)
+ Press Ctrl+C at any time to gracefully teardown both servers.
+============================================================
+
+[FRONTEND VITE] 
+[FRONTEND VITE] > react_frontend@0.0.0 dev
+[FRONTEND VITE] > vite
+[FRONTEND VITE] 
+[FRONTEND VITE] 
+[FRONTEND VITE]   [32m[1mVITE[22m v7.3.1[39m  [2mready in [0m[1m267[22m[2m[0m ms[22m
+[FRONTEND VITE] 
+[FRONTEND VITE]   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[FRONTEND VITE] [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[BACKEND R-API] No suitable parser found to handle request body type text/csv.
