@@ -60,7 +60,9 @@ function(age=65, sex="Male", smoke="Former", pack_years=20, ecog=1, stage="II", 
       clinical_trials_ci_upper_95 = pred$ci_upper,
       probability_survival_5y = pred$prob_surv_5y,
       probability_mortality_5y = pred$prob_mortality_5y,
-      treatment_effectiveness_score = pred$trt_effectiveness_prob
+      treatment_effectiveness_score = pred$trt_effectiveness_prob,
+      genetic_risk_modifier = pred$genetic_risk_modifier,
+      genetic_risk_shift_percent = pred$genetic_risk_shift_percent
     )
   )
 }

@@ -29,17 +29,33 @@ generate_prediction <- function(age, sex, smoke, pack_years, ecog, stage,
   set.seed(abs(round(age + tumor_size*10 + genetic_score)))
   
   base_median <- 65 # base expected months
-  
+
   stage_val <- match(stage, c("I", "II", "III", "IV"))
-  
+  if (is.na(stage_val)) stage_val <- 2
+
+  ecog_num <- suppressWarnings(as.numeric(ecog))
+  if (is.na(ecog_num)) ecog_num <- 1
+
+  pack_years_num <- suppressWarnings(as.numeric(pack_years))
+  if (is.na(pack_years_num)) pack_years_num <- 0
+
+  genetic_num <- suppressWarnings(as.numeric(genetic_score))
+  if (is.na(genetic_num)) genetic_num <- 50
+  genetic_num <- min(max(genetic_num, 0), 100)
+
   risk_multiplier <- 1.0 + (age - 50) * 0.015 + 
     (stage_val * 0.4) + 
     (tumor_size * 0.08) + 
-    (as.numeric(ecog) * 0.25)
+    (ecog_num * 0.25) +
+    (pack_years_num * 0.006)
   
   if (smoke == "Current") risk_multiplier <- risk_multiplier * 1.4
   if (smoke == "Former") risk_multiplier <- risk_multiplier * 1.15
-  risk_multiplier <- risk_multiplier - (genetic_score / 100 * 0.3)
+
+  # Genetics modifies hazard directly: >50 shifts risk lower, <50 shifts risk higher.
+  genetic_centered <- (genetic_num - 50) / 50
+  genetic_risk_modifier <- 1 - (genetic_centered * 0.22)
+  risk_multiplier <- risk_multiplier * genetic_risk_modifier
   
   trt_effect <- switch(treatment,
                        "Surgery" = 0.55,
@@ -72,6 +88,8 @@ generate_prediction <- function(age, sex, smoke, pack_years, ecog, stage,
     ci_upper = as.numeric(ci_upper),
     prob_surv_5y = prob_surv_5y,
     prob_mortality_5y = prob_mortality_5y,
-    trt_effectiveness_prob = trt_effectiveness_prob
+    trt_effectiveness_prob = trt_effectiveness_prob,
+    genetic_risk_modifier = as.numeric(genetic_risk_modifier),
+    genetic_risk_shift_percent = as.numeric((genetic_risk_modifier - 1) * 100)
   )
 }

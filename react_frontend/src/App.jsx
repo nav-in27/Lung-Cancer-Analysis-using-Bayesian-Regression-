@@ -1,366 +1,656 @@
-import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid } from 'recharts';
-import { Search, Activity, Clock, Shield, Download, Dna, Microchip, User, HeartPulse, Pill, Stethoscope, UploadCloud } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import {
+  Activity,
+  CalendarDays,
+  CircleDot,
+  Clock3,
+  Cpu,
+  Heart,
+  Info,
+  Layers3,
+  ShieldCheck,
+  Sparkles,
+  Stethoscope,
+  TrendingUp,
+  UploadCloud,
+  UserRound,
+  Waves,
+} from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import './App.css';
 
-const API_URL = "http://127.0.0.1:8000/predict";
-const UPLOAD_URL = "http://127.0.0.1:8000/upload_dataset";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
+const API_URL = `${API_BASE_URL}/predict`;
+const UPLOAD_URL = `${API_BASE_URL}/upload_dataset`;
+
+const stageRiskMap = { I: 0.22, II: 0.56, III: 0.93, IV: 1.34 };
+const treatmentScoreMap = {
+  Surgery: 0.31,
+  Chemotherapy: 0.23,
+  Radiation: 0.21,
+  Immunotherapy: 0.28,
+  'Targeted Therapy': 0.26,
+  Combination: 0.34,
+};
+
+const sliderConfig = [
+  { id: 'age', label: 'Age', min: 18, max: 100, step: 1, unit: 'yr', icon: CalendarDays, info: 'Patient age at diagnosis' },
+  { id: 'pack_years', label: 'Pack Years', min: 0, max: 60, step: 1, unit: '', icon: Stethoscope, info: 'Lifetime smoking exposure' },
+  { id: 'ecog', label: 'ECOG Score', min: 0, max: 4, step: 1, unit: '', icon: Activity, info: 'Performance status score' },
+  { id: 'tumor_size', label: 'Tumor Size', min: 0.5, max: 10, step: 0.1, unit: 'cm', icon: CircleDot, info: 'Approximate lesion size' },
+  { id: 'genetic_score', label: 'Genetic Marker Score', min: 0, max: 100, step: 1, unit: '', icon: Sparkles, info: 'Protective genomic profile indicator' },
+];
+
+const estimateGeneticRiskShift = (score) => {
+  const numericScore = Number(score);
+  const boundedScore = Number.isFinite(numericScore) ? Math.max(0, Math.min(100, numericScore)) : 50;
+  const centered = (boundedScore - 50) / 50;
+  const modifier = 1 - centered * 0.22;
+  return (modifier - 1) * 100;
+};
+
+const formatPercent = (value, digits = 1) => `${Number(value).toFixed(digits)}%`;
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const SelectField = ({ id, label, value, onChange, options, icon: Icon, info }) => (
+  <div className="field-block">
+    <div className="field-label">
+      <div className="field-title">
+        <Icon size={18} strokeWidth={1.8} />
+        <span>{label}</span>
+      </div>
+      <span className="field-info" title={info}>
+        <Info size={16} strokeWidth={1.8} />
+      </span>
+    </div>
+    <select id={id} value={value} onChange={onChange} className="panel-select">
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
+);
+
+const SliderField = ({ config, value, onChange }) => {
+  const Icon = config.icon;
+  const displayValue = config.id === 'genetic_score' ? Number(value).toFixed(0) : Number(value).toFixed(config.step < 1 ? 1 : 0);
+
+  const percentage = ((value - config.min) / (config.max - config.min)) * 100;
+
+  return (
+    <div className="field-block">
+      <div className="field-label">
+        <div className="field-title">
+          <Icon size={18} strokeWidth={1.8} />
+          <span>{config.label}</span>
+        </div>
+        <span className="field-info" title={config.info}>
+          <Info size={16} strokeWidth={1.8} />
+        </span>
+      </div>
+      <div className="slider-row">
+        <input
+          id={config.id}
+          type="range"
+          min={config.min}
+          max={config.max}
+          step={config.step}
+          value={value}
+          onChange={onChange}
+          className="panel-slider"
+          style={{
+            background: `linear-gradient(90deg, #1477ff 0%, #1477ff ${percentage}%, #e4e8ef ${percentage}%, #e4e8ef 100%)`
+          }}
+        />
+        <div className="slider-value">
+          {displayValue}
+          {config.unit ? ` ${config.unit}` : ''}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MetricCard = ({ icon: Icon, label, value, suffix }) => (
+  <div className="metric-card">
+    <div className="metric-header">
+      <Icon size={18} strokeWidth={1.8} />
+      <span>{label}</span>
+    </div>
+    <div className="metric-value">
+      {value}
+      {suffix ? <span>{suffix}</span> : null}
+    </div>
+  </div>
+);
 
 function App() {
   const [formData, setFormData] = useState({
-    age: 65,
+    age: 62,
     sex: 'Male',
     smoke: 'Former',
-    pack_years: 20,
-    stage: 'II',
-    ecog: '1',
-    tumor_size: 3.5,
-    genetic_score: 60,
-    treatment: 'Immunotherapy'
+    pack_years: 25,
+    stage: 'III',
+    ecog: 1,
+    tumor_size: 4.2,
+    genetic_score: 65,
+    treatment: 'Surgery',
   });
-
   const [loading, setLoading] = useState(false);
   const [prediction, setPrediction] = useState(null);
   const [survData, setSurvData] = useState([]);
   const [distData, setDistData] = useState([]);
+  const [apiStatus, setApiStatus] = useState('connecting');
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  const handleChange = (e) => {
-    const { id, value, type } = e.target;
-    setFormData(prev => ({
+  const handleChange = (event) => {
+    const { id, value, type } = event.target;
+    const shouldParseNumber = type === 'number' || type === 'range';
+    setFormData((prev) => ({
       ...prev,
-      [id]: type === 'number' ? parseFloat(value) : value
+      [id]: shouldParseNumber ? Number(value) : value,
     }));
   };
 
-  const simulateLocalFallback = (data) => {
-    console.warn("Plumber API unreachable. Simulating Bayesian posterior distributions seamlessly.");
-    let base = 65;
-    let risk = 1.0 + (data.age - 50) * 0.015 + (data.tumor_size * 0.08);
-    if (data.stage === "III") risk += 0.4;
-    if (data.stage === "IV") risk += 0.8;
-    if (data.smoke === "Current") risk *= 1.4;
-
-    let effect = 1.0;
-    if (data.treatment === "Surgery") effect = 0.55;
-    if (data.treatment === "Immunotherapy") effect = 0.60;
-
-    let med = (base * effect) / risk;
-    let ci_l = med * 0.65;
-    let ci_u = med * 1.45;
-
-    let prob_5y = Math.exp(-(Math.log(2) / med) * 60);
+  const normalizePrediction = (rawPrediction, geneticScore) => {
+    const providedShift = Number(rawPrediction?.genetic_risk_shift_percent);
+    const geneticShift = Number.isFinite(providedShift)
+      ? providedShift
+      : estimateGeneticRiskShift(geneticScore);
 
     return {
-      median_survival_months: med,
-      clinical_trials_ci_lower_95: ci_l,
-      clinical_trials_ci_upper_95: ci_u,
-      probability_survival_5y: prob_5y,
-      probability_mortality_5y: 1 - prob_5y,
-      treatment_effectiveness_score: prob_5y * 1.5 > 1 ? 0.98 : prob_5y * 1.5
+      ...rawPrediction,
+      genetic_risk_shift_percent: geneticShift,
+    };
+  };
+
+  const simulateLocalFallback = (data) => {
+    const baseMedian = 65;
+    const stageRisk = stageRiskMap[data.stage] ?? 0.56;
+    const ecogScore = Number.isFinite(Number(data.ecog)) ? Number(data.ecog) : 1;
+    const packYears = Number.isFinite(Number(data.pack_years)) ? Number(data.pack_years) : 0;
+
+    let risk =
+      1.0 +
+      (Number(data.age) - 50) * 0.015 +
+      stageRisk +
+      Number(data.tumor_size) * 0.08 +
+      ecogScore * 0.2 +
+      packYears * 0.004;
+
+    if (data.sex === 'Female') risk *= 0.95;
+    if (data.smoke === 'Current') risk *= 1.35;
+    if (data.smoke === 'Former') risk *= 1.15;
+
+    const geneticRiskShift = estimateGeneticRiskShift(data.genetic_score);
+    risk *= 1 + geneticRiskShift / 100;
+
+    const treatmentEffect = {
+      Surgery: 0.55,
+      Chemotherapy: 0.85,
+      Radiation: 0.8,
+      Immunotherapy: 0.6,
+      'Targeted Therapy': 0.5,
+      Combination: 0.4,
+    }[data.treatment] ?? 0.8;
+
+    const median = (baseMedian * treatmentEffect) / Math.max(risk, 0.25);
+    const ciSpread = 0.34;
+    const ciLower = Math.max(4, median * (1 - ciSpread));
+    const ciUpper = median * (1 + ciSpread * 1.15);
+    const prob5y = Math.exp(-(Math.log(2) / Math.max(median, 1)) * 60);
+    const treatmentEffectiveness = Math.min(0.99, Math.max(0.05, prob5y * 1.42));
+
+    return {
+      median_survival_months: median,
+      clinical_trials_ci_lower_95: ciLower,
+      clinical_trials_ci_upper_95: ciUpper,
+      probability_survival_5y: prob5y,
+      probability_mortality_5y: 1 - prob5y,
+      treatment_effectiveness_score: treatmentEffectiveness,
+      genetic_risk_shift_percent: geneticRiskShift,
     };
   };
 
   const calculateCharts = (pred) => {
-    // Survival Curve Data
-    const times = Array.from({ length: 120 }, (_, i) => i);
-    const lambda = Math.log(2) / pred.median_survival_months;
-    const sData = times.map(t => {
-      const prob = Math.exp(-lambda * t) * 100;
+    const medianMonths = Math.max(Number(pred.median_survival_months) || 1, 1);
+    const ciLower = Math.max(Number(pred.clinical_trials_ci_lower_95) || 1, 1);
+    const ciUpper = Math.max(Number(pred.clinical_trials_ci_upper_95) || 1, 1);
+    const maxMonth = Math.max(60, Math.ceil(ciUpper * 2.3));
+    const lambda = Math.log(2) / medianMonths;
+
+    const survivalCurve = Array.from({ length: 13 }, (_, index) => {
+      const month = Math.round((maxMonth / 12) * index);
       return {
-        time: t,
-        median: prob,
-        upper: Math.min(100, prob * 1.15),
-        lower: Math.max(0, prob * 0.85)
+        month,
+        survival: Math.exp(-lambda * month) * 100,
       };
     });
-    setSurvData(sData);
+    setSurvData(survivalCurve);
 
-    // Density Data
-    const x = Array.from({ length: 150 }, (_, i) => i + 1);
-    const sigma = (pred.clinical_trials_ci_upper_95 - pred.clinical_trials_ci_lower_95) / 3.92;
-    const mu = pred.median_survival_months;
-
-    const dData = x.map(val => {
-      const density = Math.exp(-0.5 * Math.pow((val - mu) / sigma, 2)) / (sigma * Math.sqrt(2 * Math.PI));
-      return { time: val, density: density };
+    const sigma = Math.max((ciUpper - ciLower) / 3.92, 0.9);
+    const distributionCurve = Array.from({ length: 12 }, (_, index) => {
+      const percentile = 1 + index * 9;
+      const month = (maxMonth / 11) * index;
+      const density = Math.exp(-0.5 * ((month - medianMonths) / sigma) ** 2) / (sigma * Math.sqrt(2 * Math.PI));
+      return {
+        band: `${percentile}%`,
+        density,
+      };
     });
-    setDistData(dData);
+    setDistData(distributionCurve);
   };
 
-  const runPrediction = async (e) => {
-    if (e) e.preventDefault();
+  const runPrediction = async (event) => {
+    if (event) event.preventDefault();
     setLoading(true);
 
     try {
       const response = await axios.post(API_URL, formData);
       if (response.data.status === 'success') {
-        const pred = response.data.prediction;
-        setPrediction(pred);
-        calculateCharts(pred);
+        const nextPrediction = normalizePrediction(response.data.prediction, formData.genetic_score);
+        setPrediction(nextPrediction);
+        calculateCharts(nextPrediction);
+        setApiStatus('connected');
       }
-    } catch (err) {
-      console.error("API Connection Failed:", err);
-      // Fallback
-      const pred = simulateLocalFallback(formData);
-      setPrediction(pred);
-      calculateCharts(pred);
+    } catch (error) {
+      const nextPrediction = normalizePrediction(simulateLocalFallback(formData), formData.genetic_score);
+      setPrediction(nextPrediction);
+      calculateCharts(nextPrediction);
+      setApiStatus('fallback');
+      console.error('API connection failed. Using local fallback.', error);
     } finally {
-      setTimeout(() => setLoading(false), 800);
+      setLastUpdated(new Date());
+      setTimeout(() => setLoading(false), 700);
     }
   };
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
     if (!file) return;
 
-    const formDataObj = new FormData();
-    formDataObj.append('dataset', file);
+    const uploadData = new FormData();
+    uploadData.append('dataset', file);
 
     setLoading(true);
     try {
-      const res = await axios.post(UPLOAD_URL, formDataObj, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+      await axios.post(UPLOAD_URL, uploadData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
-      if (res.data.status === 'success') {
-        alert(res.data.message);
-      }
-    } catch (err) {
-      console.warn("Upload failed or backend unavailable, simulating success:", err);
-      alert("Success: Dataset successfully archived for the next MCMC retraining cycle. Model accuracy expected to improve.");
+    } catch (error) {
+      console.warn('Upload fallback triggered.', error);
     } finally {
       setLoading(false);
-      e.target.value = null; // reset input
+      event.target.value = null;
     }
   };
 
   useEffect(() => {
     runPrediction();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const survivalProbability = prediction ? prediction.probability_survival_5y * 100 : 0;
+  const mortalityProbability = prediction ? prediction.probability_mortality_5y * 100 : 0;
+  const credibleLower = prediction ? prediction.clinical_trials_ci_lower_95 : 0;
+  const credibleUpper = prediction ? prediction.clinical_trials_ci_upper_95 : 0;
+  const medianMonths = prediction ? prediction.median_survival_months : 0;
+
+  const credibleCenter = prediction ? clamp(((medianMonths - credibleLower) / Math.max(credibleUpper - credibleLower, 1)) * 100, 10, 90) : 50;
+  const credibleWidth = prediction ? clamp(((credibleUpper - credibleLower) / Math.max(credibleUpper, 1)) * 100, 18, 54) : 28;
+
+  const riskItems = useMemo(() => {
+    const geneticRiskShift = estimateGeneticRiskShift(formData.genetic_score);
+    return [
+      {
+        label: 'Cancer Stage',
+        score: ((stageRiskMap[formData.stage] ?? 0.56) / 1.34) * 100,
+        state: (stageRiskMap[formData.stage] ?? 0.56) > 0.6 ? 'Adverse' : 'Favorable',
+      },
+      {
+        label: 'Age',
+        score: clamp(((formData.age - 18) / 82) * 100, 12, 100),
+        state: formData.age < 65 ? 'Favorable' : 'Adverse',
+      },
+      {
+        label: 'Smoking History',
+        score: formData.smoke === 'Current' ? 92 : formData.smoke === 'Former' ? 58 : 18,
+        state: formData.smoke === 'Never' ? 'Favorable' : 'Adverse',
+      },
+      {
+        label: 'ECOG Score',
+        score: clamp((Number(formData.ecog) / 4) * 100, 10, 100),
+        state: Number(formData.ecog) <= 1 ? 'Favorable' : 'Adverse',
+      },
+      {
+        label: 'Tumor Size',
+        score: clamp((Number(formData.tumor_size) / 10) * 100, 10, 100),
+        state: Number(formData.tumor_size) <= 3 ? 'Favorable' : 'Adverse',
+      },
+      {
+        label: 'Genetic Markers',
+        score: clamp(Math.abs(geneticRiskShift) * 3.4, 12, 100),
+        state: geneticRiskShift <= 0 ? 'Favorable' : 'Adverse',
+      },
+    ];
+  }, [formData]);
+
+  const treatmentBars = useMemo(() => (
+    Object.entries(treatmentScoreMap).map(([name, score]) => ({
+      name,
+      value: Math.round(score * 100 + (name === formData.treatment ? 3 : 0)),
+      active: name === formData.treatment,
+    }))
+  ), [formData.treatment]);
+
+  const apiStatusText = apiStatus === 'connected'
+    ? 'Active'
+    : apiStatus === 'fallback'
+      ? 'Simulation'
+      : 'Connecting';
+
   return (
-    <div className="app-container">
-      {/* Sidebar Navigation */}
-      <aside className="sidebar">
-        <div className="brand">
-          <Dna className="logo-icon" size={28} />
-          <h2>OncoBayes<span>.AI</span></h2>
+    <div className="page-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <header className="app-topbar">
+        <div className="brand-lockup">
+          <div className="brand-badge">
+            <Cpu size={18} strokeWidth={2} />
+          </div>
+          <div className="brand-copy">
+            <strong>BayesOnc AI</strong>
+          </div>
         </div>
 
-        <form id="clinical-form" className="input-panel" onSubmit={runPrediction}>
-          <div className="section-title">Patient Profile</div>
+        <div className="topbar-meta">
+          <span>Bayesian Lung Cancer Predictor</span>
+          <div className={`live-pill ${apiStatus}`}>
+            <span className="live-dot" />
+            {apiStatusText}
+          </div>
+        </div>
+      </header>
 
-          <div className="form-group row">
-            <div className="col">
-              <label htmlFor="age">Age</label>
-              <input type="number" id="age" value={formData.age} onChange={handleChange} min="18" max="100" required />
-            </div>
-            <div className="col">
-              <label htmlFor="sex">Sex</label>
-              <select id="sex" value={formData.sex} onChange={handleChange}>
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-            </div>
+      <div className="dashboard-shell">
+        <aside className="panel panel-sidebar">
+          <div className="panel-heading sticky">
+            <h2>Patient Parameters</h2>
+            <p>Configure clinical input variables</p>
           </div>
 
-          <div className="form-group row">
-            <div className="col">
-              <label htmlFor="smoke">Smoking</label>
-              <select id="smoke" value={formData.smoke} onChange={handleChange}>
-                <option value="Never">Never</option>
-                <option value="Former">Former</option>
-                <option value="Current">Current</option>
-              </select>
-            </div>
-            <div className="col">
-              <label htmlFor="pack_years">Pack Years</label>
-              <input type="number" id="pack_years" value={formData.pack_years} onChange={handleChange} min="0" />
-            </div>
-          </div>
+          <form className="controls-stack" onSubmit={runPrediction}>
+            <SliderField config={sliderConfig[0]} value={formData.age} onChange={handleChange} />
 
-          <div className="section-title">Clinical Pathology</div>
+            <SelectField
+              id="sex"
+              label="Sex"
+              value={formData.sex}
+              onChange={handleChange}
+              icon={UserRound}
+              info="Reported sex"
+              options={[
+                { value: 'Male', label: 'Male' },
+                { value: 'Female', label: 'Female' },
+              ]}
+            />
 
-          <div className="form-group row">
-            <div className="col">
-              <label htmlFor="stage">Stage</label>
-              <select id="stage" value={formData.stage} onChange={handleChange}>
-                <option value="I">Stage I</option>
-                <option value="II">Stage II</option>
-                <option value="III">Stage III</option>
-                <option value="IV">Stage IV</option>
-              </select>
-            </div>
-            <div className="col">
-              <label htmlFor="ecog">ECOG Score</label>
-              <select id="ecog" value={formData.ecog} onChange={handleChange}>
-                <option value="0">0</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-              </select>
-            </div>
-          </div>
+            <SelectField
+              id="smoke"
+              label="Smoking Status"
+              value={formData.smoke}
+              onChange={handleChange}
+              icon={Stethoscope}
+              info="Smoking behavior category"
+              options={[
+                { value: 'Never', label: 'Never' },
+                { value: 'Former', label: 'Former' },
+                { value: 'Current', label: 'Current' },
+              ]}
+            />
 
-          <div className="form-group row">
-            <div className="col">
-              <label htmlFor="tumor_size">Tumor Size (cm)</label>
-              <input type="number" id="tumor_size" value={formData.tumor_size} onChange={handleChange} step="0.1" min="0.1" />
-            </div>
-            <div className="col">
-              <label htmlFor="genetic_score">Genetic Score</label>
-              <input type="number" id="genetic_score" value={formData.genetic_score} onChange={handleChange} min="0" max="100" />
-            </div>
-          </div>
+            <SliderField config={sliderConfig[1]} value={formData.pack_years} onChange={handleChange} />
+            <SliderField config={sliderConfig[2]} value={formData.ecog} onChange={handleChange} />
 
-          <div className="section-title">Therapeutics</div>
+            <SelectField
+              id="stage"
+              label="Cancer Stage"
+              value={formData.stage}
+              onChange={handleChange}
+              icon={Layers3}
+              info="Clinical stage grouping"
+              options={[
+                { value: 'I', label: 'Stage I' },
+                { value: 'II', label: 'Stage II' },
+                { value: 'III', label: 'Stage IIIA' },
+                { value: 'IV', label: 'Stage IV' },
+              ]}
+            />
 
-          <div className="form-group">
-            <label htmlFor="treatment">Treatment Plan</label>
-            <select id="treatment" value={formData.treatment} onChange={handleChange}>
-              <option value="Surgery">Surgery</option>
-              <option value="Chemotherapy">Chemotherapy</option>
-              <option value="Radiation">Radiation</option>
-              <option value="Immunotherapy">Immunotherapy</option>
-              <option value="Targeted Therapy">Targeted Therapy</option>
-              <option value="Combination">Combination</option>
-            </select>
-          </div>
+            <SliderField config={sliderConfig[3]} value={formData.tumor_size} onChange={handleChange} />
+            <SliderField config={sliderConfig[4]} value={formData.genetic_score} onChange={handleChange} />
 
-          <div className="section-title">Model Fine-Tuning</div>
-          <div className="form-group">
-            <label className="upload-btn">
-              <UploadCloud size={16} /> Upload New Dataset (CSV/Excel)
-              <input type="file" accept=".csv, .xls, .xlsx" onChange={handleFileUpload} hidden />
+            <SelectField
+              id="treatment"
+              label="Treatment"
+              value={formData.treatment}
+              onChange={handleChange}
+              icon={Heart}
+              info="Selected treatment strategy"
+              options={[
+                { value: 'Surgery', label: 'Surgery' },
+                { value: 'Chemotherapy', label: 'Chemotherapy' },
+                { value: 'Radiation', label: 'Radiation' },
+                { value: 'Immunotherapy', label: 'Immunotherapy' },
+                { value: 'Targeted Therapy', label: 'Targeted Therapy' },
+                { value: 'Combination', label: 'Combined' },
+              ]}
+            />
+
+            <label className="upload-strip">
+              <UploadCloud size={16} strokeWidth={1.8} />
+              <span>Upload new dataset</span>
+              <input type="file" accept=".csv,.xls,.xlsx" hidden onChange={handleFileUpload} />
             </label>
-            <div className="upload-help" style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '6px', lineHeight: '1.3' }}>
-              Upload clinical records to securely retrain parameters.
-            </div>
+
+            <button type="submit" className="predict-button">
+              <Waves size={18} strokeWidth={2} />
+              Run AI Prediction
+            </button>
+          </form>
+        </aside>
+
+        <main className="panel panel-results">
+          <div className="panel-heading">
+            <h2>Prediction Results</h2>
+            <p>Bayesian posterior estimates</p>
           </div>
 
-          <button type="submit" className="btn-predict" id="trigger-predict">
-            <Microchip size={18} /> Run Bayesian Model
-          </button>
-        </form>
-      </aside>
-
-      {/* Main Dashboard View */}
-      <main className="dashboard">
-        <header className="topbar">
-          <div className="search-bar">
-            <Search size={16} />
-            <input type="text" placeholder="Search patient ID or records..." />
-          </div>
-          <div className="user-profile">
-            <div className="status-indicator">
-              <span className="pulse"></span> API Connected
-            </div>
-            <img src="https://ui-avatars.com/api/?name=Dr+Naveen&background=0D8ABC&color=fff" alt="User" className="avatar" />
-          </div>
-        </header>
-
-        <div className="dashboard-content">
-          <div className="kpi-grid">
-            <div className="kpi-card glass">
-              <div className="kpi-icon teal"><Clock size={24} /></div>
-              <div className="kpi-data">
-                <h3>Median Survival</h3>
-                <div className="value">{prediction ? prediction.median_survival_months.toFixed(1) : '--'}</div>
-                <div className="sub-text">
-                  Months <span className="ci-range">({prediction ? `${prediction.clinical_trials_ci_lower_95.toFixed(1)} to ${prediction.clinical_trials_ci_upper_95.toFixed(1)} CI` : '-- to -- CI'})</span>
+          <section className="gauge-section">
+            <div className="gauge-wrap">
+              <div
+                className="gauge-ring"
+                style={{ '--gauge-value': `${survivalProbability}%` }}
+              >
+                <div className="gauge-inner">
+                  <div className="gauge-value">{formatPercent(survivalProbability)}</div>
                 </div>
               </div>
+              <div className="gauge-caption">5-Year Survival Probability</div>
             </div>
+          </section>
 
-            <div className="kpi-card glass">
-              <div className="kpi-icon emerald"><HeartPulse size={24} /></div>
-              <div className="kpi-data">
-                <h3>5-Year Survival</h3>
-                <div className="value">{prediction ? (prediction.probability_survival_5y * 100).toFixed(1) : '--'}%</div>
-                <div className="sub-text">Posterior Probability</div>
+          <section className="risk-strip">
+            <div className="risk-strip-head">
+              <span>Mortality Risk</span>
+              <strong>{formatPercent(mortalityProbability)}</strong>
+            </div>
+            <div className="risk-track">
+              <div
+                className="risk-fill"
+                style={{ width: `${mortalityProbability}%` }}
+              />
+            </div>
+          </section>
+
+          <section className="metrics-row">
+            <MetricCard
+              icon={Clock3}
+              label="Expected Survival"
+              value={prediction ? Math.round(prediction.median_survival_months) : '--'}
+              suffix="months"
+            />
+            <MetricCard
+              icon={ShieldCheck}
+              label="Survival Rate"
+              value={prediction ? Math.round(survivalProbability) : '--'}
+              suffix="%"
+            />
+          </section>
+
+          <section className="credible-card">
+            <div className="credible-head">
+              <div className="credible-title">
+                <TrendingUp size={16} strokeWidth={1.8} />
+                <span>95% Credible Interval</span>
               </div>
             </div>
-
-            <div className="kpi-card glass">
-              <div className="kpi-icon purple"><Shield size={24} /></div>
-              <div className="kpi-data">
-                <h3>Treatment Efficacy</h3>
-                <div className="value">{prediction ? (prediction.treatment_effectiveness_score * 100).toFixed(1) : '--'}%</div>
-                <div className="sub-text">Relative to Baseline Care</div>
+            <div className="credible-track">
+              <div
+                className="credible-band"
+                style={{
+                  left: `${credibleCenter - credibleWidth / 2}%`,
+                  width: `${credibleWidth}%`,
+                }}
+              >
+                <span className="credible-marker" />
               </div>
             </div>
+            <div className="credible-values">
+              <span>{prediction ? formatPercent((credibleLower / 60) * 100) : '--'}</span>
+              <strong>{formatPercent(survivalProbability)}</strong>
+              <span>{prediction ? formatPercent((credibleUpper / 60) * 100) : '--'}</span>
+            </div>
+          </section>
+
+          <div className="results-footer">
+            <div className="footer-chip">
+              <Sparkles size={14} strokeWidth={1.8} />
+              Genetic impact {prediction ? `${Math.abs(prediction.genetic_risk_shift_percent).toFixed(1)}%` : '--'}
+            </div>
+            {lastUpdated ? (
+              <div className="footer-time">Updated {lastUpdated.toLocaleTimeString()}</div>
+            ) : null}
+          </div>
+        </main>
+
+        <aside className="panel panel-analytics">
+          <div className="panel-heading sticky">
+            <h2>Advanced Analytics</h2>
+            <p>Interactive visualizations</p>
           </div>
 
-          <div className="charts-grid">
-            <div className="chart-card glass large-span">
-              <div className="chart-header">
-                <h3>Posterior Survival Trajectory</h3>
-                <div className="chart-actions">
-                  <button className="btn-icon"><Download size={16} /></button>
+          <section className="analytic-card">
+            <div className="analytic-title">
+              <TrendingUp size={18} strokeWidth={1.8} />
+              <span>Survival Curve</span>
+            </div>
+            <div className="mini-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={survData} margin={{ top: 12, right: 8, left: 0, bottom: 6 }}>
+                  <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                  <Tooltip formatter={(value) => formatPercent(value)} labelFormatter={(value) => `Month ${value}`} />
+                  <Line type="monotone" dataKey="survival" stroke="#1477ff" strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="analytic-card">
+            <div className="analytic-title">
+              <Activity size={18} strokeWidth={1.8} />
+              <span>Treatment Comparison</span>
+            </div>
+            <div className="mini-chart treatment-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={treatmentBars} layout="vertical" margin={{ top: 8, right: 12, left: 24, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="4 5" horizontal={false} stroke="#eef2f7" />
+                  <XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                  <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} width={96} tick={{ fill: '#7a8297', fontSize: 11 }} />
+                  <Tooltip formatter={(value) => `${value}%`} />
+                  <Bar dataKey="value" radius={[0, 10, 10, 0]} barSize={15}>
+                    {treatmentBars.map((entry) => (
+                      <Cell key={entry.name} fill={entry.active ? '#e86f63' : '#f1a197'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="analytic-card">
+            <div className="analytic-title">
+              <Waves size={18} strokeWidth={1.8} />
+              <span>Posterior Distribution</span>
+            </div>
+            <div className="mini-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={distData} margin={{ top: 12, right: 8, left: 0, bottom: 6 }}>
+                  <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#ece8fb" />
+                  <XAxis dataKey="band" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                  <YAxis hide domain={[0, 'dataMax + 0.03']} />
+                  <Tooltip formatter={(value) => Number(value).toFixed(4)} labelFormatter={(value) => `Percentile ${value}`} />
+                  <Line type="monotone" dataKey="density" stroke="#7c5ce3" strokeWidth={3} dot={false} activeDot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="analytic-card risk-card">
+            <div className="analytic-title">
+              <ShieldCheck size={18} strokeWidth={1.8} />
+              <span>Risk Factor Importance</span>
+            </div>
+            <div className="risk-list">
+              {riskItems.map((item) => (
+                <div key={item.label} className="risk-item">
+                  <div className="risk-item-head">
+                    <span>{item.label}</span>
+                    <strong className={item.state === 'Favorable' ? 'state-good' : 'state-bad'}>{item.state}</strong>
+                  </div>
+                  <div className="risk-item-track">
+                    <div
+                      className={`risk-item-fill ${item.state === 'Favorable' ? 'good' : 'bad'}`}
+                      style={{ width: `${item.score}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={survData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorSurv" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#00D2FF" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#00D2FF" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorCI" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#00D2FF" stopOpacity={0.1} />
-                        <stop offset="95%" stopColor="#00D2FF" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="time" stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
-                    <YAxis stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'rgba(10, 15, 28, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                      itemStyle={{ color: '#F3F4F6' }}
-                      labelStyle={{ color: '#9CA3AF' }}
-                    />
-                    <Area type="monotone" dataKey="upper" stroke="none" fillOpacity={1} fill="url(#colorCI)" />
-                    <Area type="monotone" dataKey="lower" stroke="none" fill="rgba(7, 11, 20, 1)" />
-                    <Area type="monotone" dataKey="median" stroke="#00D2FF" strokeWidth={3} fillOpacity={1} fill="url(#colorSurv)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              ))}
             </div>
+          </section>
+        </aside>
+      </div>
 
-            <div className="chart-card glass">
-              <div className="chart-header">
-                <h3>Posterior Density (Uncertainty)</h3>
-              </div>
-              <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={distData} margin={{ top: 10, right: 0, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="colorDensity" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#8B5CF6" stopOpacity={0.6} />
-                        <stop offset="95%" stopColor="#8B5CF6" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <XAxis dataKey="time" stroke="rgba(255,255,255,0.4)" fontSize={12} tickLine={false} axisLine={false} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: 'rgba(10, 15, 28, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }}
-                      itemStyle={{ color: '#F3F4F6' }}
-                      labelStyle={{ color: '#9CA3AF' }}
-                    />
-                    <Area type="monotone" dataKey="density" stroke="#8B5CF6" strokeWidth={2} fillOpacity={1} fill="url(#colorDensity)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* Loading Overlay */}
-      <div className={`loader-overlay ${loading ? 'active' : ''}`} id="loader">
-        <div className="spinner"></div>
-        <p>Running MCMC Samples...</p>
+      <div className={`loading-screen ${loading ? 'active' : ''}`}>
+        <div className="loading-spinner" />
+        <p>Running Bayesian posterior sampling...</p>
       </div>
     </div>
   );
