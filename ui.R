@@ -97,6 +97,74 @@ ui <- page_navbar(
       )
     )
   ),
+
+  nav_panel("Patient Monitoring", icon = icon("notes-medical"),
+    card(
+      card_header("Longitudinal Patient Monitoring Timeline"),
+      layout_columns(
+        col_widths = c(4, 8),
+        card(
+          card_header("Monitoring Controls"),
+          selectInput("patient_monitor_id", "Select patient_id", choices = NULL),
+          p("Track tumor size, ECOG score, and treatment response progression across follow-up visits.")
+        ),
+        card(
+          card_header("Clinical Timeline"),
+          plotlyOutput("patient_timeline_plot")
+        )
+      )
+    ),
+    card(
+      card_header("Visit-Level Clinical Log"),
+      DTOutput("patient_visit_table")
+    )
+  ),
+
+  nav_panel("Treatment Simulator", icon = icon("microscope"),
+    layout_columns(
+      fill = FALSE,
+      value_box(
+        title = "Best Treatment Option",
+        value = textOutput("best_treatment_text"),
+        p("Highest projected 5-year survival"),
+        showcase = icon("award"),
+        theme = "success"
+      ),
+      value_box(
+        title = "Predicted 5-Year Survival",
+        value = textOutput("best_survival_text"),
+        p("Posterior mean estimate"),
+        showcase = icon("chart-area"),
+        theme = "info"
+      ),
+      value_box(
+        title = "Expected Survival Ranking",
+        value = textOutput("ranking_summary_text"),
+        p("Across chemotherapy, radiation, surgery, immunotherapy"),
+        showcase = icon("list-ol"),
+        theme = "primary"
+      )
+    ),
+    card(
+      card_header("Treatment Outcome Simulator"),
+      plotlyOutput("treatment_sim_plot")
+    ),
+    layout_columns(
+      col_widths = c(7, 5),
+      card(
+        card_header("Survival Projection Over Time"),
+        plotlyOutput("survival_projection_plot")
+      ),
+      card(
+        card_header("Patient Risk Gauge"),
+        plotlyOutput("risk_gauge_large")
+      )
+    ),
+    card(
+      card_header("AI Prediction Explanation"),
+      uiOutput("ai_explanation_ui")
+    )
+  ),
   
   nav_panel("Model Diagnostics", icon = icon("stethoscope"),
     card(

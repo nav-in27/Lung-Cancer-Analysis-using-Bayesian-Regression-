@@ -34,6 +34,10 @@ import './App.css';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const API_URL = `${API_BASE_URL}/predict`;
 const UPLOAD_URL = `${API_BASE_URL}/upload_dataset`;
+const PATIENTS_URL = `${API_BASE_URL}/patients`;
+const PATIENT_PROFILE_URL = `${API_BASE_URL}/patient_profile`;
+const FOLLOWUP_PATIENTS_URL = `${API_BASE_URL}/followup_patients`;
+const FOLLOWUP_VISITS_URL = `${API_BASE_URL}/followup_visits`;
 
 const stageRiskMap = { I: 0.22, II: 0.56, III: 0.93, IV: 1.34 };
 const treatmentScoreMap = {
@@ -43,6 +47,13 @@ const treatmentScoreMap = {
   Immunotherapy: 0.28,
   'Targeted Therapy': 0.26,
   Combination: 0.34,
+};
+
+const simulatorTreatments = ['Chemotherapy', 'Radiation', 'Surgery', 'Immunotherapy'];
+const responsePalette = {
+  Improved: '#27b463',
+  Stable: '#f39c12',
+  Progressive: '#e74c3c',
 };
 
 const sliderConfig = [
@@ -63,6 +74,11 @@ const estimateGeneticRiskShift = (score) => {
 
 const formatPercent = (value, digits = 1) => `${Number(value).toFixed(digits)}%`;
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const unwrapValue = (value) => (Array.isArray(value) ? value[0] : value);
+const asNumber = (value, fallback = 0) => {
+  const numeric = Number(unwrapValue(value));
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
 
 const SelectField = ({ id, label, value, onChange, options, icon: Icon, info }) => (
   <div className="field-block">
@@ -156,6 +172,15 @@ function App() {
   const [distData, setDistData] = useState([]);
   const [apiStatus, setApiStatus] = useState('connecting');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [activeView, setActiveView] = useState('overview');
+  const [allPatientIds, setAllPatientIds] = useState([]);
+  const [patientLookupId, setPatientLookupId] = useState('');
+  const [patientLookupMessage, setPatientLookupMessage] = useState('');
+  const [loadedPatientProfile, setLoadedPatientProfile] = useState(null);
+  const [followupPatientIds, setFollowupPatientIds] = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState('');
+  const [followupVisits, setFollowupVisits] = useState([]);
+  const [treatmentSimulation, setTreatmentSimulation] = useState([]);
 
   const handleChange = (event) => {
     const { id, value, type } = event.target;
@@ -176,6 +201,21 @@ function App() {
       ...rawPrediction,
       genetic_risk_shift_percent: geneticShift,
     };
+  };
+
+  const parseApiPrediction = (rawPrediction, geneticScore) => {
+    const base = {
+      median_survival_months: asNumber(rawPrediction?.median_survival_months, 0),
+      clinical_trials_ci_lower_95: asNumber(rawPrediction?.clinical_trials_ci_lower_95, 0),
+      clinical_trials_ci_upper_95: asNumber(rawPrediction?.clinical_trials_ci_upper_95, 0),
+      probability_survival_5y: asNumber(rawPrediction?.probability_survival_5y, 0),
+      probability_mortality_5y: asNumber(rawPrediction?.probability_mortality_5y, 1),
+      treatment_effectiveness_score: asNumber(rawPrediction?.treatment_effectiveness_score, 0),
+      genetic_risk_modifier: asNumber(rawPrediction?.genetic_risk_modifier, 1),
+      genetic_risk_shift_percent: asNumber(rawPrediction?.genetic_risk_shift_percent, estimateGeneticRiskShift(geneticScore)),
+    };
+
+    return normalizePrediction(base, geneticScore);
   };
 
   const simulateLocalFallback = (data) => {
@@ -226,6 +266,41 @@ function App() {
     };
   };
 
+  const buildTreatmentSimulationFromFallback = (baseData) => {
+    const rows = simulatorTreatments.map((treatment) => {
+      const pred = simulateLocalFallback({ ...baseData, treatment });
+      return {
+        treatment,
+        survival: pred.probability_survival_5y * 100,
+        lower: clamp((pred.probability_survival_5y * 100) - 8, 0, 100),
+        upper: clamp((pred.probability_survival_5y * 100) + 8, 0, 100),
+      };
+    });
+
+    const best = Math.max(...rows.map((row) => row.survival));
+    return rows.map((row) => ({ ...row, best: row.survival === best }));
+  };
+
+  const buildTreatmentSimulationFromApi = async (baseData) => {
+    const responses = await Promise.all(
+      simulatorTreatments.map(async (treatment) => {
+        const response = await axios.post(API_URL, { ...baseData, treatment });
+        const pred = parseApiPrediction(response?.data?.prediction ?? {}, baseData.genetic_score);
+        const center = (pred.probability_survival_5y || 0) * 100;
+
+        return {
+          treatment,
+          survival: center,
+          lower: clamp(center - 7, 0, 100),
+          upper: clamp(center + 7, 0, 100),
+        };
+      })
+    );
+
+    const best = Math.max(...responses.map((row) => row.survival));
+    return responses.map((row) => ({ ...row, best: row.survival === best }));
+  };
+
   const calculateCharts = (pred) => {
     const medianMonths = Math.max(Number(pred.median_survival_months) || 1, 1);
     const ciLower = Math.max(Number(pred.clinical_trials_ci_lower_95) || 1, 1);
@@ -255,27 +330,96 @@ function App() {
     setDistData(distributionCurve);
   };
 
-  const runPrediction = async (event) => {
+  const runPrediction = async (event, payload = formData) => {
     if (event) event.preventDefault();
     setLoading(true);
 
     try {
-      const response = await axios.post(API_URL, formData);
-      if (response.data.status === 'success') {
-        const nextPrediction = normalizePrediction(response.data.prediction, formData.genetic_score);
+      const response = await axios.post(API_URL, payload);
+      const status = String(unwrapValue(response?.data?.status) || '').toLowerCase();
+
+      if (status === 'success') {
+        const nextPrediction = parseApiPrediction(response.data.prediction, payload.genetic_score);
         setPrediction(nextPrediction);
         calculateCharts(nextPrediction);
+        const simRows = await buildTreatmentSimulationFromApi(payload);
+        setTreatmentSimulation(simRows);
         setApiStatus('connected');
+      } else {
+        throw new Error('Predict endpoint returned non-success status');
       }
     } catch (error) {
-      const nextPrediction = normalizePrediction(simulateLocalFallback(formData), formData.genetic_score);
+      const nextPrediction = normalizePrediction(simulateLocalFallback(payload), payload.genetic_score);
       setPrediction(nextPrediction);
       calculateCharts(nextPrediction);
+      setTreatmentSimulation(buildTreatmentSimulationFromFallback(payload));
       setApiStatus('fallback');
       console.error('API connection failed. Using local fallback.', error);
     } finally {
       setLastUpdated(new Date());
       setTimeout(() => setLoading(false), 700);
+    }
+  };
+
+  const loadPatientById = async () => {
+    const candidateId = String(patientLookupId || '').trim();
+    if (!candidateId) {
+      setPatientLookupMessage('Enter a valid patient ID.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await axios.get(PATIENT_PROFILE_URL, {
+        params: { patient_id: candidateId },
+      });
+
+      const profileRaw = response?.data?.patient_profile;
+      const profile = profileRaw
+        ? {
+            patient_id: String(unwrapValue(profileRaw.patient_id) || candidateId),
+            age: asNumber(profileRaw.age, 62),
+            sex: String(unwrapValue(profileRaw.sex) || 'Male'),
+            smoke: String(unwrapValue(profileRaw.smoke) || 'Never'),
+            pack_years: asNumber(profileRaw.pack_years, 0),
+            ecog: asNumber(profileRaw.ecog, 1),
+            stage: String(unwrapValue(profileRaw.stage) || 'II'),
+            tumor_size: asNumber(profileRaw.tumor_size, 3),
+            genetic_score: asNumber(profileRaw.genetic_score, 50),
+            treatment_response_category: String(unwrapValue(profileRaw.treatment_response_category) || 'N/A'),
+          }
+        : null;
+
+      if (!profile) {
+        setPatientLookupMessage('Patient ID was not found.');
+        return;
+      }
+
+      const nextFormData = {
+        age: Number(profile.age) || 62,
+        sex: profile.sex === 'Female' ? 'Female' : 'Male',
+        smoke: ['Never', 'Former', 'Current'].includes(profile.smoke) ? profile.smoke : 'Never',
+        pack_years: Number.isFinite(Number(profile.pack_years)) ? Number(profile.pack_years) : 0,
+        stage: ['I', 'II', 'III', 'IV'].includes(profile.stage) ? profile.stage : 'II',
+        ecog: Number.isFinite(Number(profile.ecog)) ? Number(profile.ecog) : 1,
+        tumor_size: Number.isFinite(Number(profile.tumor_size)) ? Number(profile.tumor_size) : 3,
+        genetic_score: Number.isFinite(Number(profile.genetic_score)) ? Number(profile.genetic_score) : 50,
+        treatment: formData.treatment,
+      };
+
+      setFormData(nextFormData);
+      setLoadedPatientProfile(profile);
+      setSelectedPatientId(candidateId);
+      setPatientLookupMessage(`Loaded patient ${candidateId}`);
+      await runPrediction(null, nextFormData);
+    } catch (error) {
+      if (error?.response?.status === 404) {
+        setPatientLookupMessage('Patient ID was not found in the dataset.');
+      } else {
+        setPatientLookupMessage('Could not reach API. Please wait for backend to start and try again.');
+      }
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -303,6 +447,61 @@ function App() {
     runPrediction();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const fetchAllPatientIds = async () => {
+      try {
+        const response = await axios.get(PATIENTS_URL);
+        const ids = response?.data?.patient_ids ?? [];
+        setAllPatientIds(ids);
+        if (ids.length > 0) {
+          setPatientLookupId((prev) => (prev ? prev : ids[0]));
+        }
+      } catch (error) {
+        setAllPatientIds([]);
+      }
+    };
+
+    fetchAllPatientIds();
+  }, []);
+
+  useEffect(() => {
+    const fetchPatients = async () => {
+      try {
+        const response = await axios.get(FOLLOWUP_PATIENTS_URL);
+        const ids = response?.data?.patient_ids ?? [];
+        setFollowupPatientIds(ids);
+        if (ids.length > 0) {
+          setSelectedPatientId((prev) => (prev ? prev : ids[0]));
+        }
+      } catch (error) {
+        setFollowupPatientIds([]);
+      }
+    };
+
+    fetchPatients();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPatientId) {
+      setFollowupVisits([]);
+      return;
+    }
+
+    const fetchVisits = async () => {
+      try {
+        const response = await axios.get(FOLLOWUP_VISITS_URL, {
+          params: { patient_id: selectedPatientId },
+        });
+        const visits = response?.data?.visits ?? [];
+        setFollowupVisits(visits);
+      } catch (error) {
+        setFollowupVisits([]);
+      }
+    };
+
+    fetchVisits();
+  }, [selectedPatientId]);
 
   const survivalProbability = prediction ? prediction.probability_survival_5y * 100 : 0;
   const mortalityProbability = prediction ? prediction.probability_mortality_5y * 100 : 0;
@@ -363,6 +562,40 @@ function App() {
       ? 'Simulation'
       : 'Connecting';
 
+  const monitoringSeries = useMemo(() => (
+    followupVisits.map((visit) => ({
+      date: visit.visit_date,
+      tumor: Number(visit.tumor_size_cm) || 0,
+      ecog: Number(visit.ecog_score) || 0,
+      response: visit.treatment_response || 'Stable',
+    }))
+  ), [followupVisits]);
+
+  const responseSeries = useMemo(() => {
+    const counts = {};
+    followupVisits.forEach((visit) => {
+      const key = visit.treatment_response || 'Stable';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+
+    return Object.keys(counts).map((key) => ({
+      name: key,
+      value: counts[key],
+      fill: responsePalette[key] || '#7f8c8d',
+    }));
+  }, [followupVisits]);
+
+  const simulatorSorted = useMemo(() => {
+    return [...treatmentSimulation].sort((a, b) => b.survival - a.survival);
+  }, [treatmentSimulation]);
+
+  const explanationFactors = useMemo(() => {
+    return [...riskItems]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4)
+      .map((item) => item.label);
+  }, [riskItems]);
+
   return (
     <div className="page-shell">
       <div className="ambient ambient-one" />
@@ -374,12 +607,12 @@ function App() {
             <Cpu size={18} strokeWidth={2} />
           </div>
           <div className="brand-copy">
-            <strong>BayesOnc AI</strong>
+            <strong>BayesLCA</strong>
           </div>
         </div>
 
         <div className="topbar-meta">
-          <span>Bayesian Lung Cancer Predictor</span>
+          <span>BayesLCA Clinical Intelligence</span>
           <div className={`live-pill ${apiStatus}`}>
             <span className="live-dot" />
             {apiStatusText}
@@ -387,6 +620,31 @@ function App() {
         </div>
       </header>
 
+      <div className="view-switcher">
+        <button
+          type="button"
+          className={`view-switch-btn ${activeView === 'overview' ? 'active' : ''}`}
+          onClick={() => setActiveView('overview')}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          className={`view-switch-btn ${activeView === 'monitoring' ? 'active' : ''}`}
+          onClick={() => setActiveView('monitoring')}
+        >
+          Patient Monitoring
+        </button>
+        <button
+          type="button"
+          className={`view-switch-btn ${activeView === 'simulator' ? 'active' : ''}`}
+          onClick={() => setActiveView('simulator')}
+        >
+          Treatment Simulator
+        </button>
+      </div>
+
+      {activeView === 'overview' && (
       <div className="dashboard-shell">
         <aside className="panel panel-sidebar">
           <div className="panel-heading sticky">
@@ -395,6 +653,43 @@ function App() {
           </div>
 
           <form className="controls-stack" onSubmit={runPrediction}>
+            <div className="field-block patient-lookup-block">
+              <div className="field-label">
+                <div className="field-title">
+                  <UserRound size={18} strokeWidth={1.8} />
+                  <span>Patient ID Lookup</span>
+                </div>
+              </div>
+
+              <input
+                type="text"
+                className="panel-select patient-id-input"
+                value={patientLookupId}
+                onChange={(event) => setPatientLookupId(event.target.value)}
+                list="patient-ids-list"
+                placeholder="Enter patient_id"
+              />
+              <datalist id="patient-ids-list">
+                {allPatientIds.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
+
+              <button type="button" className="patient-load-button" onClick={loadPatientById}>
+                Load Patient Data
+              </button>
+
+              {patientLookupMessage ? <div className="patient-lookup-msg">{patientLookupMessage}</div> : null}
+
+              {loadedPatientProfile ? (
+                <div className="patient-condition-card">
+                  <div><strong>Patient ID:</strong> {loadedPatientProfile.patient_id}</div>
+                  <div><strong>Condition:</strong> Stage {loadedPatientProfile.stage} / ECOG {loadedPatientProfile.ecog}</div>
+                  <div><strong>Response Category:</strong> {loadedPatientProfile.treatment_response_category || 'N/A'}</div>
+                </div>
+              ) : null}
+            </div>
+
             <SliderField config={sliderConfig[0]} value={formData.age} onChange={handleChange} />
 
             <SelectField
@@ -647,6 +942,214 @@ function App() {
           </section>
         </aside>
       </div>
+      )}
+
+      {activeView === 'monitoring' && (
+        <div className="module-shell monitoring-shell">
+          <section className="panel panel-module">
+            <div className="panel-heading">
+              <h2>Patient Monitoring Timeline</h2>
+              <p>Longitudinal follow-up analysis from visit history</p>
+            </div>
+
+            <div className="module-controls">
+              <label htmlFor="patient-monitoring-id">Patient ID</label>
+              <select
+                id="patient-monitoring-id"
+                className="panel-select"
+                value={selectedPatientId}
+                onChange={(event) => setSelectedPatientId(event.target.value)}
+              >
+                {followupPatientIds.length === 0 ? <option value="">No follow-up data</option> : null}
+                {followupPatientIds.map((id) => (
+                  <option key={id} value={id}>{id}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="module-grid two-col">
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <TrendingUp size={18} strokeWidth={1.8} />
+                  <span>Tumor Size Progression</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monitoringSeries} margin={{ top: 12, right: 10, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="tumor" stroke="#e74c3c" strokeWidth={3} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Activity size={18} strokeWidth={1.8} />
+                  <span>ECOG Progression</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monitoringSeries} margin={{ top: 12, right: 10, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis domain={[0, 4]} tickCount={5} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="ecog" stroke="#2c3e50" strokeWidth={3} dot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            <div className="module-grid two-col">
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Heart size={18} strokeWidth={1.8} />
+                  <span>Treatment Response Over Visits</span>
+                </div>
+                <div className="response-timeline">
+                  {monitoringSeries.length === 0 ? (
+                    <div className="empty-note">No follow-up records for this patient.</div>
+                  ) : monitoringSeries.map((row, index) => (
+                    <div key={`${row.date}-${index}`} className="response-row">
+                      <span className="response-dot" style={{ background: responsePalette[row.response] || '#7f8c8d' }} />
+                      <strong>{row.response}</strong>
+                      <span>{row.date}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Waves size={18} strokeWidth={1.8} />
+                  <span>Response Distribution</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={responseSeries} margin={{ top: 12, right: 10, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip />
+                      <Bar dataKey="value" radius={[10, 10, 0, 0]}>
+                        {responseSeries.map((entry) => (
+                          <Cell key={entry.name} fill={entry.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {activeView === 'simulator' && (
+        <div className="module-shell simulator-shell">
+          <section className="panel panel-module">
+            <div className="panel-heading">
+              <h2>Treatment Outcome Simulator</h2>
+              <p>Bayesian treatment comparison with credible ranges and ranking</p>
+            </div>
+
+            <div className="module-grid two-col">
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <TrendingUp size={18} strokeWidth={1.8} />
+                  <span>Treatment Survival Comparison</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={simulatorSorted} margin={{ top: 10, right: 10, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="treatment" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                      <Bar dataKey="survival" radius={[10, 10, 0, 0]}>
+                        {simulatorSorted.map((entry) => (
+                          <Cell key={entry.treatment} fill={entry.best ? '#2f9e44' : '#1d73ff'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <ShieldCheck size={18} strokeWidth={1.8} />
+                  <span>Best Treatment & Ranking</span>
+                </div>
+                <div className="ranking-list">
+                  {simulatorSorted.map((row, index) => (
+                    <div className={`ranking-item ${row.best ? 'best' : ''}`} key={row.treatment}>
+                      <span>#{index + 1} {row.treatment}</span>
+                      <strong>{row.survival.toFixed(1)}%</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="module-grid two-col">
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Waves size={18} strokeWidth={1.8} />
+                  <span>Survival Projection Over Time</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={survData} margin={{ top: 12, right: 8, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                      <Line type="monotone" dataKey="survival" stroke="#27b463" strokeWidth={3} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Cpu size={18} strokeWidth={1.8} />
+                  <span>Patient Risk Gauge</span>
+                </div>
+                <div className="gauge-wrap large-gauge-wrap">
+                  <div
+                    className="gauge-ring risk-gauge-large"
+                    style={{ '--gauge-value': `${survivalProbability}%` }}
+                  >
+                    <div className="gauge-inner">
+                      <div className="gauge-value">{formatPercent(survivalProbability)}</div>
+                    </div>
+                  </div>
+                  <div className="gauge-caption">Green good, yellow moderate, red high risk</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="analytic-card explanation-card">
+              <div className="analytic-title">
+                <Sparkles size={18} strokeWidth={1.8} />
+                <span>AI Prediction Explanation</span>
+              </div>
+              <p className="explanation-text">The model prediction is mainly influenced by:</p>
+              <ul className="explanation-list">
+                {explanationFactors.map((factor) => (
+                  <li key={factor}>{factor}</li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className={`loading-screen ${loading ? 'active' : ''}`}>
         <div className="loading-spinner" />

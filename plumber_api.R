@@ -6,6 +6,20 @@ library(plumber)
 # Source global dependencies for prediction
 source("global.R")
 
+#* @filter cors
+function(req, res) {
+  res$setHeader("Access-Control-Allow-Origin", "*")
+  res$setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+  res$setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+  if (req$REQUEST_METHOD == "OPTIONS") {
+    res$status <- 200
+    return(list())
+  }
+
+  plumber::forward()
+}
+
 #* @apiTitle Bayesian Clinical Decision Support API
 #* @apiDescription Exposing the lung cancer survival model for remote inference
 
@@ -104,4 +118,91 @@ function(req, res) {
     file = file_obj$filename,
     archive_path = dest_path
   ))
+}
+
+#* List available follow-up patient IDs
+#* @get /followup_patients
+function() {
+  ids <- get_followup_patient_ids()
+  list(
+    status = "success",
+    count = length(ids),
+    patient_ids = ids
+  )
+}
+
+#* List available patient IDs from primary patient dataset
+#* @get /patients
+function() {
+  ids <- get_patient_ids()
+  list(
+    status = "success",
+    count = length(ids),
+    patient_ids = ids
+  )
+}
+
+#* Get baseline patient profile by patient_id
+#* @param patient_id:character Patient identifier
+#* @get /patient_profile
+function(patient_id = "", res) {
+  if (!nzchar(patient_id)) {
+    res$status <- 400
+    return(list(status = "error", message = "Parameter 'patient_id' is required."))
+  }
+
+  profile <- get_patient_profile(patient_id)
+  if (is.null(profile)) {
+    res$status <- 404
+    return(list(status = "error", message = "Patient ID not found in primary dataset."))
+  }
+
+  list(
+    status = "success",
+    patient_profile = profile
+  )
+}
+
+#* Get follow-up visits for a patient
+#* @param patient_id:character Patient identifier
+#* @get /followup_visits
+function(patient_id = "", res) {
+  if (!"patient_id" %in% names(followup_data) || nrow(followup_data) == 0) {
+    res$status <- 404
+    return(list(status = "error", message = "Follow-up dataset not available."))
+  }
+
+  if (!nzchar(patient_id)) {
+    res$status <- 400
+    return(list(status = "error", message = "Parameter 'patient_id' is required."))
+  }
+
+  subset_df <- followup_data[as.character(followup_data$patient_id) == as.character(patient_id), , drop = FALSE]
+  subset_df <- subset_df[order(subset_df$visit_date), , drop = FALSE]
+
+  if (nrow(subset_df) == 0) {
+    return(list(status = "success", patient_id = patient_id, count = 0, visits = list()))
+  }
+
+  visits <- lapply(seq_len(nrow(subset_df)), function(i) {
+    row <- subset_df[i, , drop = FALSE]
+    list(
+      visit_id = as.character(row$visit_id),
+      patient_id = as.character(row$patient_id),
+      visit_date = as.character(row$visit_date),
+      ecog_score = as.numeric(row$ecog_score),
+      tumor_size_cm = as.numeric(row$tumor_size_cm),
+      treatment_current = as.character(row$treatment_current),
+      treatment_response = as.character(row$treatment_response),
+      symptom_severity = suppressWarnings(as.numeric(row$symptom_severity)),
+      doctor_assessment = as.character(row$doctor_assessment)
+    )
+  })
+
+  list(
+    status = "success",
+    patient_id = as.character(patient_id),
+    count = length(visits),
+    visits = visits
+  )
 }

@@ -6,7 +6,7 @@ echo =========================================================
 echo.
 
 echo Launching unified project runner...
-python run_project.py
+python run_project.py --mode full
 
 if errorlevel 1 (
   echo.

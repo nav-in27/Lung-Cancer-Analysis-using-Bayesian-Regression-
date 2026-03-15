@@ -1,4 +1,5 @@
 import os
+import argparse
 import shutil
 import socket
 import subprocess
@@ -20,6 +21,8 @@ def resolve_rscript():
         return from_path
 
     candidates = [
+        r"C:\Program Files\R\R-4.5.3\bin\x64\Rscript.exe",
+        r"C:\Program Files\R\R-4.5.3\bin\Rscript.exe",
         r"C:\Program Files\R\R-4.5.2\bin\x64\Rscript.exe",
         r"C:\Program Files\R\R-4.5.2\bin\Rscript.exe",
         r"C:\Program Files\R\R-4.4.3\bin\x64\Rscript.exe",
@@ -117,6 +120,7 @@ def build_r_env():
     libs = [
         r"C:\Users\navee\AppData\Local\R\win-library\4.5",
         r"C:\Users\navee\Documents\R\win-library\4.5",
+        r"C:\Program Files\R\R-4.5.3\library",
     ]
     current_libs = env.get("R_LIBS_USER", "")
     if current_libs:
@@ -126,6 +130,15 @@ def build_r_env():
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Run Bayesian Lung Cancer project services")
+    parser.add_argument(
+        "--mode",
+        choices=["shiny", "full"],
+        default="full",
+        help="'shiny' runs the Shiny dashboard (app.R); 'full' runs Plumber API + React frontend.",
+    )
+    args = parser.parse_args()
+
     print("\n" + "=" * 60, flush=True)
     print(" Initializing Bayesian Lung Cancer Application", flush=True)
     print("=" * 60 + "\n", flush=True)
@@ -134,6 +147,66 @@ def main():
     if not rscript:
         print("[ERROR] Could not locate Rscript. Install R or add R/bin to PATH.", flush=True)
         return 1
+
+    if args.mode == "shiny":
+        shiny_port = find_free_port(3838)
+        if shiny_port != 3838:
+            print(f"[WARN] Port 3838 is busy. Using Shiny port {shiny_port}.", flush=True)
+
+        shiny_env = build_r_env()
+        shiny_process = None
+
+        try:
+            print(f"Starting Shiny dashboard on port {shiny_port}...", flush=True)
+            shiny_process = subprocess.Popen(
+                [
+                    rscript,
+                    "-e",
+                    f"options(shiny.host='127.0.0.1', shiny.port={shiny_port}); shiny::runApp('app.R', launch.browser=FALSE)",
+                ],
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=shiny_env,
+            )
+            threading.Thread(
+                target=stream_output,
+                args=(shiny_process, "[SHINY APP]"),
+                daemon=True,
+            ).start()
+
+            shiny_ready, shiny_error = wait_for_http(
+                url=f"http://127.0.0.1:{shiny_port}/",
+                timeout_seconds=60,
+                process=shiny_process,
+                service_name="Shiny app",
+            )
+            if not shiny_ready:
+                print(f"[ERROR] {shiny_error}", flush=True)
+                return 1
+
+            print("\n" + "=" * 60, flush=True)
+            print(" SUCCESS: Shiny dashboard is running.", flush=True)
+            print(f" Dashboard -> http://127.0.0.1:{shiny_port}/", flush=True)
+            print(" Press Ctrl+C at any time to gracefully stop the server.", flush=True)
+            print("=" * 60 + "\n", flush=True)
+
+            while True:
+                if shiny_process.poll() is not None:
+                    print(
+                        f"[ERROR] Shiny app exited unexpectedly with code {shiny_process.returncode}.",
+                        flush=True,
+                    )
+                    return shiny_process.returncode or 1
+                time.sleep(1)
+
+        except KeyboardInterrupt:
+            print("\n[SYSTEM] Received teardown signal (Ctrl+C).", flush=True)
+            return 0
+        finally:
+            stop_process(shiny_process, "Shiny app")
 
     npm = resolve_npm()
     if not npm:

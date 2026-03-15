@@ -1,4 +1,9 @@
 server <- function(input, output, session) {
+
+  observe({
+    ids <- get_followup_patient_ids()
+    updateSelectInput(session, "patient_monitor_id", choices = ids, selected = ids[1])
+  })
   
   predictions <- eventReactive(input$predict_btn, {
     id <- showNotification("Running MCMC iterations & computing posterior predictive distribution...", duration = 3, type = "message")
@@ -35,6 +40,218 @@ server <- function(input, output, session) {
   output$vb_trt_eff <- renderText({
     req(predictions())
     sprintf("%.1f %%", predictions()$trt_effectiveness_prob * 100)
+  })
+
+  selected_patient_visits <- reactive({
+    req(input$patient_monitor_id)
+    validate(need(nrow(followup_data) > 0, "Follow-up visit dataset not found."))
+
+    df <- followup_data %>%
+      filter(as.character(patient_id) == as.character(input$patient_monitor_id)) %>%
+      arrange(visit_date)
+
+    validate(need(nrow(df) > 0, "No follow-up records available for the selected patient."))
+    df
+  })
+
+  output$patient_timeline_plot <- renderPlotly({
+    df <- selected_patient_visits()
+
+    p_tumor <- plot_ly(
+      data = df,
+      x = ~visit_date,
+      y = ~tumor_size_cm,
+      type = "scatter",
+      mode = "lines+markers",
+      line = list(color = "#E74C3C", width = 2),
+      marker = list(size = 7),
+      name = "Tumor Size (cm)",
+      hovertemplate = "Date: %{x}<br>Tumor Size: %{y:.2f} cm<extra></extra>"
+    ) %>% layout(
+      yaxis = list(title = "Tumor Size (cm)"),
+      xaxis = list(title = "")
+    )
+
+    p_ecog <- plot_ly(
+      data = df,
+      x = ~visit_date,
+      y = ~ecog_score,
+      type = "scatter",
+      mode = "lines+markers",
+      line = list(color = "#2C3E50", width = 2),
+      marker = list(size = 7),
+      name = "ECOG Score",
+      hovertemplate = "Date: %{x}<br>ECOG: %{y}<extra></extra>"
+    ) %>% layout(
+      yaxis = list(title = "ECOG Score", dtick = 1),
+      xaxis = list(title = "")
+    )
+
+    p_resp <- plot_ly(
+      data = df,
+      x = ~visit_date,
+      y = ~treatment_response,
+      type = "scatter",
+      mode = "markers+text",
+      color = ~treatment_response,
+      text = ~treatment_response,
+      textposition = "top center",
+      marker = list(size = 10),
+      hovertemplate = "Date: %{x}<br>Response: %{y}<extra></extra>",
+      showlegend = FALSE
+    ) %>% layout(
+      yaxis = list(title = "Treatment Response"),
+      xaxis = list(title = "Visit Date")
+    )
+
+    subplot(p_tumor, p_ecog, p_resp, nrows = 3, shareX = TRUE, titleY = TRUE) %>%
+      layout(
+        title = "Medical Monitoring Timeline",
+        margin = list(l = 65, r = 20, t = 55, b = 45)
+      )
+  })
+
+  output$patient_visit_table <- renderDT({
+    df <- selected_patient_visits() %>%
+      select(
+        patient_id,
+        visit_date,
+        tumor_size_cm,
+        ecog_score,
+        treatment_current,
+        treatment_response,
+        symptom_severity,
+        doctor_assessment
+      )
+
+    datatable(
+      df,
+      rownames = FALSE,
+      options = list(pageLength = 8, scrollX = TRUE)
+    )
+  })
+
+  treatment_simulation <- reactive({
+    req(predictions())
+
+    simulate_treatment_outcomes(
+      age = input$age,
+      sex = input$sex,
+      smoke = input$smoke,
+      pack_years = input$pack_years,
+      ecog = input$ecog,
+      stage = input$stage,
+      tumor_size = input$tumor_size,
+      genetic_score = input$genetic_score
+    )
+  })
+
+  output$best_treatment_text <- renderText({
+    sim <- treatment_simulation()
+    sim$treatment[which.max(sim$survival_prob)]
+  })
+
+  output$best_survival_text <- renderText({
+    sim <- treatment_simulation()
+    best <- sim[which.max(sim$survival_prob), ]
+    sprintf("%.1f%%", best$survival_prob * 100)
+  })
+
+  output$ranking_summary_text <- renderText({
+    sim <- treatment_simulation()
+    ordered <- sim$treatment[order(-sim$survival_prob)]
+    paste(ordered, collapse = " > ")
+  })
+
+  output$treatment_sim_plot <- renderPlotly({
+    sim <- treatment_simulation()
+    sim <- sim %>% mutate(treatment = factor(treatment, levels = treatment[order(survival_prob)]))
+
+    p <- ggplot(sim, aes(x = survival_prob * 100, y = treatment)) +
+      geom_errorbarh(
+        aes(xmin = ci_lower * 100, xmax = ci_upper * 100),
+        height = 0.2,
+        linewidth = 1,
+        color = "#2C3E50"
+      ) +
+      geom_point(aes(color = best), size = 4) +
+      scale_color_manual(values = c("FALSE" = "#18BC9C", "TRUE" = "#E74C3C"), guide = "none") +
+      theme_minimal(base_family = "Inter") +
+      labs(
+        title = "Treatment Outcome Simulator (5-Year Survival)",
+        x = "Predicted Survival Probability (%)",
+        y = "Treatment"
+      )
+
+    ggplotly(p, tooltip = c("x", "y")) %>% config(displayModeBar = FALSE)
+  })
+
+  output$survival_projection_plot <- renderPlotly({
+    req(predictions())
+    proj <- build_survival_projection(predictions()$posterior_samples, horizon_months = 120)
+
+    p <- ggplot(proj, aes(x = Time, y = Mean)) +
+      geom_ribbon(aes(ymin = Lower, ymax = Upper), fill = "#A9DFBF", alpha = 0.45) +
+      geom_smooth(se = FALSE, color = "#1E8449", linewidth = 1.2, span = 0.22) +
+      theme_minimal(base_family = "Inter") +
+      coord_cartesian(ylim = c(0, 1)) +
+      labs(
+        title = "Projected Survival Curve",
+        x = "Time (Months)",
+        y = "Survival Probability"
+      )
+
+    ggplotly(p) %>% config(displayModeBar = FALSE)
+  })
+
+  output$ai_explanation_ui <- renderUI({
+    factors <- get_prediction_explanation(
+      age = input$age,
+      smoke = input$smoke,
+      pack_years = input$pack_years,
+      ecog = input$ecog,
+      stage = input$stage,
+      tumor_size = input$tumor_size,
+      genetic_score = input$genetic_score
+    )
+
+    tagList(
+      p(strong("Prediction Explanation:")),
+      p("The model prediction is mainly influenced by:"),
+      tags$ul(
+        lapply(seq_len(nrow(factors)), function(i) {
+          tags$li(sprintf("%s (relative impact score: %.2f)", factors$factor[i], factors$impact[i]))
+        })
+      )
+    )
+  })
+
+  output$risk_gauge_large <- renderPlotly({
+    req(predictions())
+    val <- predictions()$prob_surv_5y * 100
+
+    plot_ly(
+      domain = list(x = c(0, 1), y = c(0, 1)),
+      value = val,
+      title = list(text = "Patient Survival Probability Gauge"),
+      type = "indicator",
+      mode = "gauge+number",
+      gauge = list(
+        axis = list(range = list(NULL, 100)),
+        bar = list(color = "#2C3E50", thickness = 0.35),
+        steps = list(
+          list(range = c(0, 35), color = "#FADBD8"),
+          list(range = c(35, 70), color = "#FCF3CF"),
+          list(range = c(70, 100), color = "#D5F5E3")
+        ),
+        threshold = list(
+          line = list(color = "#117A65", width = 4),
+          thickness = 0.8,
+          value = val
+        )
+      )
+    ) %>%
+      layout(margin = list(l = 15, r = 15, t = 60, b = 25), height = 340)
   })
   
   output$surv_curve_plot <- renderPlotly({

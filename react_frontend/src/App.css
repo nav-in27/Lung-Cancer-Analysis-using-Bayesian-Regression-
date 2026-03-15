@@ -57,6 +57,35 @@
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
 }
 
+.view-switcher {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  gap: 10px;
+  padding: 8px;
+  margin: 0 0 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(214, 220, 229, 0.96);
+}
+
+.view-switch-btn {
+  border: 0;
+  padding: 9px 14px;
+  border-radius: 12px;
+  background: transparent;
+  color: #65718a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.view-switch-btn.active {
+  background: #1d73ff;
+  color: #fff;
+  box-shadow: 0 10px 18px rgba(29, 115, 255, 0.24);
+}
+
 .brand-lockup,
 .topbar-meta {
   display: flex;
@@ -189,6 +218,48 @@
 
 .field-block {
   animation: rise 0.55s ease both;
+}
+
+.patient-lookup-block {
+  padding: 12px;
+  border: 1px solid #e1e7f0;
+  border-radius: 16px;
+  background: rgba(247, 250, 253, 0.9);
+}
+
+.patient-id-input {
+  height: 44px;
+}
+
+.patient-load-button {
+  margin-top: 10px;
+  width: 100%;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: #1d73ff;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.patient-lookup-msg {
+  margin-top: 8px;
+  color: #5f6a81;
+  font-size: 0.9rem;
+}
+
+.patient-condition-card {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid #dbe3f0;
+  background: #fff;
+  display: grid;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: #33415c;
 }
 
 .field-label {
@@ -505,6 +576,133 @@
   gap: 18px;
 }
 
+.module-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.panel-module {
+  padding: 24px;
+}
+
+.module-controls {
+  max-width: 320px;
+  margin-bottom: 18px;
+}
+
+.module-controls label {
+  display: block;
+  margin-bottom: 10px;
+  color: #4e5a72;
+  font-weight: 600;
+}
+
+.module-grid {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.module-grid.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.mini-chart.large {
+  height: 250px;
+}
+
+.response-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 6px;
+}
+
+.response-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(245, 248, 252, 0.9);
+}
+
+.response-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.response-row strong {
+  font-size: 0.95rem;
+}
+
+.response-row span {
+  color: #6f7b92;
+  font-size: 0.9rem;
+}
+
+.empty-note {
+  color: #7e889e;
+  font-size: 0.95rem;
+  padding: 10px 0;
+}
+
+.ranking-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ranking-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border: 1px solid #e1e7f0;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.ranking-item.best {
+  border-color: #8cd8aa;
+  background: #effaf3;
+}
+
+.large-gauge-wrap {
+  margin-top: 6px;
+}
+
+.risk-gauge-large {
+  width: 220px;
+  height: 220px;
+  background:
+    radial-gradient(circle at center, #fff 58%, transparent 59%),
+    conic-gradient(#e64539 0%, #f2bf3a 45%, #2dac58 var(--gauge-value), #ececef var(--gauge-value) 100%);
+}
+
+.explanation-card {
+  padding-bottom: 20px;
+}
+
+.explanation-text {
+  color: #5f6a81;
+  margin: 4px 0 10px;
+}
+
+.explanation-list {
+  margin: 0;
+  padding-left: 22px;
+  color: #1f2b3f;
+}
+
+.explanation-list li {
+  margin: 7px 0;
+}
+
 .analytic-card {
   padding: 18px 18px 14px;
   animation: rise 0.6s ease both;
@@ -698,6 +896,10 @@
   .panel-analytics {
     display: flex;
   }
+
+  .module-grid.two-col {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 720px) {
@@ -707,6 +909,12 @@
 
   .app-topbar {
     align-items: flex-start;
+  }
+
+  .view-switcher {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .topbar-meta {
@@ -731,6 +939,11 @@
   .gauge-ring {
     width: 150px;
     height: 150px;
+  }
+
+  .risk-gauge-large {
+    width: 180px;
+    height: 180px;
   }
 
   .gauge-inner {
