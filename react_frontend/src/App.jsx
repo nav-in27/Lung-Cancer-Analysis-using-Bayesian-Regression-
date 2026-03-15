@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import {
   Activity,
+  AlertCircle,
   CalendarDays,
   CircleDot,
   Clock3,
@@ -10,6 +11,7 @@ import {
   Info,
   Layers3,
   ShieldCheck,
+  Search,
   Sparkles,
   Stethoscope,
   TrendingUp,
@@ -34,6 +36,7 @@ import './App.css';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const API_URL = `${API_BASE_URL}/predict`;
 const UPLOAD_URL = `${API_BASE_URL}/upload_dataset`;
+const PATIENT_LOOKUP_URL = `${API_BASE_URL}/patient`;
 
 const stageRiskMap = { I: 0.22, II: 0.56, III: 0.93, IV: 1.34 };
 const treatmentScoreMap = {
@@ -63,6 +66,73 @@ const estimateGeneticRiskShift = (score) => {
 
 const formatPercent = (value, digits = 1) => `${Number(value).toFixed(digits)}%`;
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+const fallbackPatientRecords = {
+  '1968918': {
+    patient_id: '1968918',
+    age: 65,
+    sex: 'Male',
+    smoke: 'Never',
+    pack_years: 22.4,
+    ecog: 1,
+    stage: 'IV',
+    tumor_size: 2.9,
+    genetic_score: 84,
+    treatment: 'Combination',
+    comorbidity_score: 2,
+    response_category: 'Partial',
+    survival_status: 'Deceased',
+    condition_summary: 'Advanced-stage disease with partial treatment response and elevated long-term risk.',
+  },
+  '8878472': {
+    patient_id: '8878472',
+    age: 65,
+    sex: 'Male',
+    smoke: 'Former',
+    pack_years: 19.2,
+    ecog: 3,
+    stage: 'IV',
+    tumor_size: 3.9,
+    genetic_score: 47,
+    treatment: 'Chemotherapy',
+    comorbidity_score: 2,
+    response_category: 'Progressive',
+    survival_status: 'Alive',
+    condition_summary: 'Advanced disease with progression under therapy and high functional burden.',
+  },
+  '7339735': {
+    patient_id: '7339735',
+    age: 77,
+    sex: 'Male',
+    smoke: 'Former',
+    pack_years: 20.8,
+    ecog: 0,
+    stage: 'III',
+    tumor_size: 2.2,
+    genetic_score: 36,
+    treatment: 'Radiation',
+    comorbidity_score: 4,
+    response_category: 'Progressive',
+    survival_status: 'Alive',
+    condition_summary: 'Locally advanced disease, low performance impairment, but progressive treatment trajectory.',
+  },
+  '6897852': {
+    patient_id: '6897852',
+    age: 62,
+    sex: 'Male',
+    smoke: 'Current',
+    pack_years: 21.7,
+    ecog: 0,
+    stage: 'II',
+    tumor_size: 4.7,
+    genetic_score: 54,
+    treatment: 'Surgery',
+    comorbidity_score: 2,
+    response_category: 'Stable',
+    survival_status: 'Deceased',
+    condition_summary: 'Intermediate-stage disease with heavy lesion load and ongoing tobacco exposure.',
+  },
+};
 
 const SelectField = ({ id, label, value, onChange, options, icon: Icon, info }) => (
   <div className="field-block">
@@ -156,6 +226,10 @@ function App() {
   const [distData, setDistData] = useState([]);
   const [apiStatus, setApiStatus] = useState('connecting');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [patientSearchId, setPatientSearchId] = useState('');
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [patientLookupMessage, setPatientLookupMessage] = useState('');
+  const [patientLookupError, setPatientLookupError] = useState(false);
 
   const handleChange = (event) => {
     const { id, value, type } = event.target;
@@ -255,20 +329,21 @@ function App() {
     setDistData(distributionCurve);
   };
 
-  const runPrediction = async (event) => {
+  const runPrediction = async (event, overrideData = null) => {
     if (event) event.preventDefault();
     setLoading(true);
+    const payload = overrideData ?? formData;
 
     try {
-      const response = await axios.post(API_URL, formData);
+      const response = await axios.post(API_URL, payload);
       if (response.data.status === 'success') {
-        const nextPrediction = normalizePrediction(response.data.prediction, formData.genetic_score);
+        const nextPrediction = normalizePrediction(response.data.prediction, payload.genetic_score);
         setPrediction(nextPrediction);
         calculateCharts(nextPrediction);
         setApiStatus('connected');
       }
     } catch (error) {
-      const nextPrediction = normalizePrediction(simulateLocalFallback(formData), formData.genetic_score);
+      const nextPrediction = normalizePrediction(simulateLocalFallback(payload), payload.genetic_score);
       setPrediction(nextPrediction);
       calculateCharts(nextPrediction);
       setApiStatus('fallback');
@@ -297,6 +372,64 @@ function App() {
       setLoading(false);
       event.target.value = null;
     }
+  };
+
+  const normalizePatientForForm = (record) => {
+    const safeStage = ['I', 'II', 'III', 'IV'].includes(record.stage) ? record.stage : 'III';
+    const safeSmoke = ['Never', 'Former', 'Current'].includes(record.smoke) ? record.smoke : 'Former';
+    const safeTreatment = Object.keys(treatmentScoreMap).includes(record.treatment) ? record.treatment : 'Surgery';
+
+    return {
+      age: clamp(Number(record.age) || 62, 18, 100),
+      sex: record.sex === 'Female' ? 'Female' : 'Male',
+      smoke: safeSmoke,
+      pack_years: clamp(Number(record.pack_years) || 0, 0, 60),
+      stage: safeStage,
+      ecog: clamp(Number(record.ecog) || 1, 0, 4),
+      tumor_size: clamp(Number(record.tumor_size) || 3, 0.5, 10),
+      genetic_score: clamp(Number(record.genetic_score) || 50, 0, 100),
+      treatment: safeTreatment,
+    };
+  };
+
+  const applyPatientSelection = (record, source) => {
+    const mappedForm = normalizePatientForForm(record);
+    setFormData(mappedForm);
+    setSelectedPatient(record);
+    setPatientLookupError(false);
+    setPatientLookupMessage(`Patient ${record.patient_id} loaded from ${source}.`);
+    runPrediction(null, mappedForm);
+  };
+
+  const handlePatientLookup = async () => {
+    const trimmedId = patientSearchId.trim();
+    if (!trimmedId) {
+      setPatientLookupError(true);
+      setPatientLookupMessage('Enter a patient ID to search.');
+      return;
+    }
+
+    setPatientLookupMessage('Searching patient registry...');
+    setPatientLookupError(false);
+
+    try {
+      const response = await axios.get(`${PATIENT_LOOKUP_URL}/${encodeURIComponent(trimmedId)}`);
+      if (response.data?.status === 'success' && response.data?.patient) {
+        applyPatientSelection(response.data.patient, 'registry');
+        return;
+      }
+    } catch (error) {
+      console.warn('Patient lookup API unavailable, using fallback index if possible.', error);
+    }
+
+    const fallbackMatch = fallbackPatientRecords[trimmedId];
+    if (fallbackMatch) {
+      applyPatientSelection(fallbackMatch, 'offline archive');
+      return;
+    }
+
+    setPatientLookupError(true);
+    setPatientLookupMessage('No patient record found for that ID. Try 1968918, 8878472, 7339735, or 6897852.');
   };
 
   useEffect(() => {
@@ -357,6 +490,16 @@ function App() {
     }))
   ), [formData.treatment]);
 
+  const conditionBars = useMemo(() => {
+    if (!selectedPatient) return [];
+    return [
+      { label: 'Tumor Burden', value: clamp((Number(selectedPatient.tumor_size) / 10) * 100, 8, 100) },
+      { label: 'Performance Strain', value: clamp((Number(selectedPatient.ecog) / 4) * 100, 5, 100) },
+      { label: 'Smoking Load', value: clamp((Number(selectedPatient.pack_years) / 60) * 100, 0, 100) },
+      { label: 'Comorbidity', value: clamp((Number(selectedPatient.comorbidity_score) / 5) * 100, 0, 100) },
+    ];
+  }, [selectedPatient]);
+
   const apiStatusText = apiStatus === 'connected'
     ? 'Active'
     : apiStatus === 'fallback'
@@ -374,12 +517,12 @@ function App() {
             <Cpu size={18} strokeWidth={2} />
           </div>
           <div className="brand-copy">
-            <strong>BayesOnc AI</strong>
+            <strong>BayesLCA</strong>
           </div>
         </div>
 
         <div className="topbar-meta">
-          <span>Bayesian Lung Cancer Predictor</span>
+          <span>Precision Lung Oncology Navigator</span>
           <div className={`live-pill ${apiStatus}`}>
             <span className="live-dot" />
             {apiStatusText}
@@ -393,6 +536,43 @@ function App() {
             <h2>Patient Parameters</h2>
             <p>Configure clinical input variables</p>
           </div>
+
+          <section className="patient-search-card">
+            <div className="patient-search-head">
+              <h3>Patient ID Search</h3>
+              <span>Load and visualize a patient profile</span>
+            </div>
+
+            <div className="patient-search-row">
+              <input
+                type="text"
+                className="patient-search-input"
+                placeholder="Enter patient ID"
+                value={patientSearchId}
+                onChange={(event) => setPatientSearchId(event.target.value)}
+              />
+              <button type="button" className="patient-search-button" onClick={handlePatientLookup}>
+                <Search size={16} strokeWidth={2} />
+                View
+              </button>
+            </div>
+
+            {patientLookupMessage ? (
+              <div className={`patient-lookup-message ${patientLookupError ? 'error' : 'ok'}`}>
+                {patientLookupError ? <AlertCircle size={14} strokeWidth={1.8} /> : <ShieldCheck size={14} strokeWidth={1.8} />}
+                <span>{patientLookupMessage}</span>
+              </div>
+            ) : null}
+
+            {selectedPatient ? (
+              <div className="patient-profile-snapshot">
+                <div className="snapshot-row"><span>ID</span><strong>{selectedPatient.patient_id}</strong></div>
+                <div className="snapshot-row"><span>Condition</span><strong>{selectedPatient.condition_summary}</strong></div>
+                <div className="snapshot-row"><span>Response</span><strong>{selectedPatient.response_category}</strong></div>
+                <div className="snapshot-row"><span>Status</span><strong>{selectedPatient.survival_status}</strong></div>
+              </div>
+            ) : null}
+          </section>
 
           <form className="controls-stack" onSubmit={runPrediction}>
             <SliderField config={sliderConfig[0]} value={formData.age} onChange={handleChange} />
@@ -470,7 +650,7 @@ function App() {
 
             <button type="submit" className="predict-button">
               <Waves size={18} strokeWidth={2} />
-              Run AI Prediction
+              Run Bayesian Prediction
             </button>
           </form>
         </aside>
@@ -645,6 +825,26 @@ function App() {
               ))}
             </div>
           </section>
+
+          {selectedPatient ? (
+            <section className="analytic-card">
+              <div className="analytic-title">
+                <Activity size={18} strokeWidth={1.8} />
+                <span>Patient Condition Snapshot</span>
+              </div>
+              <div className="mini-chart treatment-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={conditionBars} layout="vertical" margin={{ top: 8, right: 12, left: 12, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="4 5" horizontal={false} stroke="#eef2f7" />
+                    <XAxis type="number" domain={[0, 100]} tickFormatter={(value) => `${value}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                    <YAxis type="category" dataKey="label" tickLine={false} axisLine={false} width={120} tick={{ fill: '#7a8297', fontSize: 11 }} />
+                    <Tooltip formatter={(value) => `${value}%`} />
+                    <Bar dataKey="value" radius={[0, 10, 10, 0]} fill="#4c7df4" barSize={15} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </section>
+          ) : null}
         </aside>
       </div>
 

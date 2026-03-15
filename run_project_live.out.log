@@ -4,8 +4,6 @@
 ============================================================
 
 Starting R Plumber API on port 8000...
-Waiting 3 seconds for statistical libraries to load...
-
 [BACKEND R-API] 
 [BACKEND R-API] Attaching package: 'bslib'
 [BACKEND R-API] 
@@ -48,22 +46,21 @@ Waiting 3 seconds for statistical libraries to load...
 [BACKEND R-API] 
 [BACKEND R-API] Running plumber API at http://127.0.0.1:8000
 [BACKEND R-API] Running swagger Docs at http://127.0.0.1:8000/__docs__/
-Starting React Frontend...
-============================================================
+Starting React Frontend on port 5173...
+[FRONTEND VITE] 
+[FRONTEND VITE] > react_frontend@0.0.0 dev
+[FRONTEND VITE] > vite --host 127.0.0.1 --port 5173 --strictPort
+[FRONTEND VITE] 
+[FRONTEND VITE] 
+[FRONTEND VITE]   [32m[1mVITE[22m v7.3.1[39m  [2mready in [0m[1m709[22m[2m[0m ms[22m
+[FRONTEND VITE] 
+[FRONTEND VITE]   [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
 
- SUCCESS: Dual Environments are spinning up!
+============================================================
+ SUCCESS: Dual environments are running.
  Backend API  -> http://127.0.0.1:8000/predict
- Frontend App -> Usually http://localhost:5173 (Check logs below)
+ Frontend App -> http://127.0.0.1:5173/
  Press Ctrl+C at any time to gracefully teardown both servers.
 ============================================================
 
-[FRONTEND VITE] 
-[FRONTEND VITE] > react_frontend@0.0.0 dev
-[FRONTEND VITE] > vite
-[FRONTEND VITE] 
-[FRONTEND VITE] 
-[FRONTEND VITE]   [32m[1mVITE[22m v7.3.1[39m  [2mready in [0m[1m267[22m[2m[0m ms[22m
-[FRONTEND VITE] 
-[FRONTEND VITE]   [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
-[FRONTEND VITE] [2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
-[BACKEND R-API] No suitable parser found to handle request body type text/csv.
+[FRONTEND VITE] ^C^C
