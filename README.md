@@ -36,6 +36,15 @@ Traditional risk tools often produce only a single value. This project focuses o
 `-- www/styles.css         # Shiny stylesheet
 ```
 
+## Clone This Project
+
+```bash
+git clone https://github.com/<your-username>/bayesian_lung_cancer.git
+cd bayesian_lung_cancer
+```
+
+If you are collaborating on this repository, replace the URL with your team/org remote URL.
+
 ## Quick Start
 
 ### 1) Prerequisites
