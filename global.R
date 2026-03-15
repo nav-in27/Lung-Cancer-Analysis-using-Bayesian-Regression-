@@ -93,3 +93,127 @@ generate_prediction <- function(age, sex, smoke, pack_years, ecog, stage,
     genetic_risk_shift_percent = as.numeric((genetic_risk_modifier - 1) * 100)
   )
 }
+
+# ---------------------------------------------------------------------------
+# Patient Dataset & Synthetic Follow-Up Data (Feature 1)
+# ---------------------------------------------------------------------------
+PATIENT_DATA_PATH <- "datasets_archive/batch_20260221_181024_Lung_Cancer_Patients.csv"
+patient_data  <- NULL
+followup_data <- NULL
+
+if (file.exists(PATIENT_DATA_PATH)) {
+  tryCatch({
+    patient_data <- read.csv(PATIENT_DATA_PATH, stringsAsFactors = FALSE)
+
+    # Generate synthetic longitudinal follow-up visits from the patient dataset.
+    # Each patient receives 3-6 simulated clinic visits whose tumor size, ECOG
+    # score, and treatment response evolve consistently with their recorded outcome.
+    set.seed(42)
+    n_pts <- min(nrow(patient_data), 150)
+
+    followup_list <- lapply(seq_len(n_pts), function(i) {
+      row        <- patient_data[i, ]
+      pid        <- row$patient_id
+      n_visits   <- sample(3:6, 1)
+
+      base_tumor <- suppressWarnings(as.numeric(row$tumor_size_cm))
+      if (is.na(base_tumor)) base_tumor <- 3.0
+
+      base_ecog  <- suppressWarnings(as.integer(row$ecog_score))
+      if (is.na(base_ecog)) base_ecog <- 1L
+
+      resp <- row$treatment_response_category
+      if (is.na(resp) || !resp %in% c("Complete", "Partial", "Stable", "Progressive")) {
+        resp <- "Stable"
+      }
+
+      tumor_trend <- switch(resp,
+        "Complete"    = -0.22,
+        "Partial"     = -0.10,
+        "Stable"      =  0.00,
+        "Progressive" =  0.18, 0)
+
+      ecog_trend <- switch(resp,
+        "Complete"    = -0.10,
+        "Partial"     = -0.05,
+        "Stable"      =  0.00,
+        "Progressive" =  0.10, 0)
+
+      resp_probs <- switch(resp,
+        "Complete"    = c(0.50, 0.30, 0.15, 0.05),
+        "Partial"     = c(0.20, 0.40, 0.30, 0.10),
+        "Stable"      = c(0.10, 0.20, 0.50, 0.20),
+        "Progressive" = c(0.05, 0.10, 0.20, 0.65),
+        c(0.10, 0.25, 0.40, 0.25))
+
+      tumor_sizes  <- numeric(n_visits)
+      ecog_scores  <- integer(n_visits)
+      tumor_sizes[1] <- base_tumor
+      ecog_scores[1] <- base_ecog
+
+      for (v in seq(2, n_visits)) {
+        tumor_sizes[v] <- max(0.1,
+          tumor_sizes[v - 1] + tumor_trend + rnorm(1, 0, 0.15))
+        ecog_scores[v] <- as.integer(max(0L, min(4L,
+          round(ecog_scores[v - 1] + ecog_trend + rnorm(1, 0, 0.4)))))
+      }
+
+      responses <- c("Complete", "Partial", "Stable", "Progressive")
+      data.frame(
+        patient_id         = as.character(pid),
+        visit_number       = seq_len(n_visits),
+        visit_month        = c(0L, cumsum(sample(1:3, n_visits - 1, replace = TRUE))),
+        tumor_size_cm      = round(tumor_sizes, 2),
+        ecog_score         = ecog_scores,
+        treatment_response = sample(responses, n_visits,
+                                    replace = TRUE, prob = resp_probs),
+        stringsAsFactors   = FALSE
+      )
+    })
+
+    followup_data <- do.call(rbind, followup_list)
+
+  }, error = function(e) {
+    message("Warning: Could not load patient dataset — ", e$message)
+  })
+}
+
+# ---------------------------------------------------------------------------
+# Variable Importance Helper (Feature 4 — AI Explanation Panel)
+# ---------------------------------------------------------------------------
+get_variable_importance <- function(age, sex, smoke, pack_years, ecog, stage,
+                                    tumor_size, treatment, genetic_score) {
+  stage_val <- match(stage, c("I", "II", "III", "IV"))
+  if (is.na(stage_val)) stage_val <- 2L
+
+  ecog_num <- suppressWarnings(as.numeric(ecog))
+  if (is.na(ecog_num)) ecog_num <- 1
+
+  pack_years_num <- suppressWarnings(as.numeric(pack_years))
+  if (is.na(pack_years_num)) pack_years_num <- 0
+
+  genetic_num <- suppressWarnings(as.numeric(genetic_score))
+  if (is.na(genetic_num)) genetic_num <- 50
+  genetic_num <- min(max(genetic_num, 0), 100)
+
+  contrib <- c(
+    "Cancer Stage"    = stage_val * 0.40,
+    "ECOG Score"      = ecog_num  * 0.25,
+    "Tumor Size"      = tumor_size * 0.08,
+    "Age"             = abs(age - 50) * 0.015,
+    "Smoking History" = if (smoke == "Current") 0.40
+                        else if (smoke == "Former") 0.18
+                        else 0.02,
+    "Pack Years"      = pack_years_num * 0.006,
+    "Genetic Score"   = abs((genetic_num - 50) / 50) * 0.22
+  )
+
+  total <- sum(contrib)
+  if (total == 0) total <- 1
+
+  data.frame(
+    Factor     = names(contrib),
+    Importance = as.numeric(contrib / total * 100),
+    stringsAsFactors = FALSE
+  )
+}
