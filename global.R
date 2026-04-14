@@ -7,6 +7,37 @@ library(tidyr)
 library(DT)
 library(rmarkdown)
 
+AUTH_USERS <- data.frame(
+  username = c("doctor", "analyst"),
+  password = c("doctor123", "analyst123"),
+  role = c("Doctor", "Research Analyst"),
+  stringsAsFactors = FALSE
+)
+
+authenticate_user <- function(username, password, users = AUTH_USERS) {
+  uname <- trimws(as.character(username))
+  pword <- as.character(password)
+
+  row <- users[users$username == uname & users$password == pword, , drop = FALSE]
+  if (nrow(row) == 0) {
+    return(NULL)
+  }
+
+  list(
+    username = row$username[1],
+    role = row$role[1]
+  )
+}
+
+get_user_role <- function(username, users = AUTH_USERS) {
+  uname <- trimws(as.character(username))
+  row <- users[users$username == uname, , drop = FALSE]
+  if (nrow(row) == 0) {
+    return(NULL)
+  }
+  as.character(row$role[1])
+}
+
 DATA_DIRECTORIES <- c(
   "datasets_archive",
   "C:/Users/navee/OneDrive/Documents/lung cancer"
@@ -294,4 +325,59 @@ get_prediction_explanation <- function(age, smoke, pack_years, ecog, stage, tumo
 
   effect_df <- effect_df[order(effect_df$impact, decreasing = TRUE), ]
   head(effect_df, 4)
+}
+
+simulate_what_if_treatments <- function(age, sex, smoke, pack_years, ecog, stage,
+                                        tumor_size, genetic_score, current_treatment,
+                                        scenario_treatments = c("Chemotherapy", "Radiation", "Surgery", "Immunotherapy")) {
+  treatments <- unique(c(as.character(current_treatment), scenario_treatments))
+
+  sims <- lapply(treatments, function(trt) {
+    pred <- generate_prediction(
+      age = age,
+      sex = sex,
+      smoke = smoke,
+      pack_years = pack_years,
+      ecog = ecog,
+      stage = stage,
+      tumor_size = tumor_size,
+      treatment = trt,
+      genetic_score = genetic_score
+    )
+
+    data.frame(
+      treatment = trt,
+      survival_prob = as.numeric(pred$prob_surv_5y),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, sims)
+  out <- out %>% distinct(treatment, .keep_all = TRUE)
+
+  current_idx <- which(out$treatment == as.character(current_treatment))[1]
+  if (is.na(current_idx)) {
+    current_idx <- 1
+  }
+
+  current_prob <- out$survival_prob[current_idx]
+  out$delta_prob <- out$survival_prob - current_prob
+  out$delta_percent <- out$delta_prob * 100
+  out$change_label <- ifelse(
+    out$delta_percent >= 0,
+    sprintf("+%.1f%%", out$delta_percent),
+    sprintf("%.1f%%", out$delta_percent)
+  )
+  out$is_current <- out$treatment == as.character(current_treatment)
+  out$rank <- rank(-out$survival_prob, ties.method = "first")
+
+  best_row <- out[which.max(out$survival_prob), , drop = FALSE]
+
+  list(
+    current_treatment = as.character(current_treatment),
+    current_prob = as.numeric(current_prob),
+    best_treatment = as.character(best_row$treatment[1]),
+    best_prob = as.numeric(best_row$survival_prob[1]),
+    table = out
+  )
 }

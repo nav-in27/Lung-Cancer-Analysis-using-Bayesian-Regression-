@@ -1,11 +1,122 @@
 server <- function(input, output, session) {
 
+  auth <- reactiveValues(
+    is_logged_in = FALSE,
+    username = NULL,
+    role = NULL
+  )
+
+  role_tab_access <- list(
+    "Doctor" = c("dashboard", "treatment_simulator", "what_if_simulator", "reports_export"),
+    "Research Analyst" = c("dashboard", "model_diagnostics", "reports_export")
+  )
+
+  all_tabs <- c(
+    "dashboard",
+    "patient_monitoring",
+    "treatment_simulator",
+    "what_if_simulator",
+    "model_diagnostics",
+    "reports_export"
+  )
+
+  apply_role_visibility <- function(role_name) {
+    allowed <- role_tab_access[[role_name]]
+    if (is.null(allowed)) {
+      allowed <- character(0)
+    }
+
+    for (tab in all_tabs) {
+      if (tab %in% allowed) {
+        nav_show(id = "main_nav", target = tab, session = session)
+      } else {
+        nav_hide(id = "main_nav", target = tab, session = session)
+      }
+    }
+
+    if (length(allowed) > 0) {
+      nav_select(id = "main_nav", selected = allowed[1], session = session)
+    }
+  }
+
+  output$app_root <- renderUI({
+    if (isTRUE(auth$is_logged_in)) {
+      main_app_ui
+    } else {
+      login_page_ui
+    }
+  })
+
+  observeEvent(input$persisted_auth, {
+    auth_info <- input$persisted_auth
+    if (is.null(auth_info$username) || is.null(auth_info$role)) {
+      return()
+    }
+
+    role <- get_user_role(auth_info$username)
+    if (is.null(role) || role != auth_info$role) {
+      return()
+    }
+
+    auth$is_logged_in <- TRUE
+    auth$username <- as.character(auth_info$username)
+    auth$role <- as.character(auth_info$role)
+  }, ignoreInit = TRUE)
+
+  observeEvent(input$login_btn, {
+    user <- authenticate_user(input$login_username, input$login_password)
+
+    if (is.null(user)) {
+      showNotification("Invalid username or password.", type = "error", duration = 3)
+      return()
+    }
+
+    auth$is_logged_in <- TRUE
+    auth$username <- user$username
+    auth$role <- user$role
+
+    session$sendCustomMessage("auth_store", list(username = user$username, role = user$role))
+    showNotification(sprintf("Welcome Dr. %s", user$username), type = "message", duration = 3)
+  })
+
+  observeEvent(input$logout_btn, {
+    auth$is_logged_in <- FALSE
+    auth$username <- NULL
+    auth$role <- NULL
+    session$sendCustomMessage("auth_clear", list())
+    showNotification("Logged out successfully.", type = "message", duration = 2)
+  })
+
   observe({
+    req(auth$is_logged_in, auth$role)
+    session$onFlushed(function() {
+      apply_role_visibility(auth$role)
+    }, once = TRUE)
+  })
+
+  output$welcome_user_text <- renderText({
+    req(auth$is_logged_in, auth$username)
+    sprintf("Welcome Dr. %s", auth$username)
+  })
+
+  output$export_pdf_ui <- renderUI({
+    req(auth$is_logged_in, auth$role)
+    if (auth$role == "Doctor") {
+      downloadButton("export_pdf", "Generate Clinical Report (PDF)", class = "btn-danger")
+    } else {
+      tags$p(class = "text-muted", "PDF export is available for Doctor role only.")
+    }
+  })
+
+  observe({
+    req(auth$is_logged_in)
     ids <- get_followup_patient_ids()
-    updateSelectInput(session, "patient_monitor_id", choices = ids, selected = ids[1])
+    selected_id <- if (length(ids) > 0) ids[1] else character(0)
+    updateSelectInput(session, "patient_monitor_id", choices = ids, selected = selected_id)
   })
   
   predictions <- eventReactive(input$predict_btn, {
+    req(auth$is_logged_in)
     id <- showNotification("Running MCMC iterations & computing posterior predictive distribution...", duration = 3, type = "message")
     
     res <- generate_prediction(
@@ -132,6 +243,7 @@ server <- function(input, output, session) {
   })
 
   treatment_simulation <- reactive({
+    req(auth$is_logged_in)
     req(predictions())
 
     simulate_treatment_outcomes(
@@ -144,6 +256,87 @@ server <- function(input, output, session) {
       tumor_size = input$tumor_size,
       genetic_score = input$genetic_score
     )
+  })
+
+  what_if_simulation <- reactive({
+    req(auth$is_logged_in)
+    req(predictions())
+
+    simulate_what_if_treatments(
+      age = input$age,
+      sex = input$sex,
+      smoke = input$smoke,
+      pack_years = input$pack_years,
+      ecog = input$ecog,
+      stage = input$stage,
+      tumor_size = input$tumor_size,
+      genetic_score = input$genetic_score,
+      current_treatment = input$treatment
+    )
+  })
+
+  output$whatif_current_text <- renderText({
+    sim <- what_if_simulation()
+    sprintf("%s (%.1f%%)", sim$current_treatment, sim$current_prob * 100)
+  })
+
+  output$whatif_best_text <- renderText({
+    sim <- what_if_simulation()
+    sprintf("%s (%.1f%%)", sim$best_treatment, sim$best_prob * 100)
+  })
+
+  output$whatif_improvement_text <- renderText({
+    sim <- what_if_simulation()
+    improve <- (sim$best_prob - sim$current_prob) * 100
+    sprintf("%+.1f%%", improve)
+  })
+
+  output$whatif_cards_ui <- renderUI({
+    sim <- what_if_simulation()
+    df <- sim$table %>% arrange(desc(survival_prob))
+
+    tagList(
+      div(
+        class = "whatif-grid",
+        lapply(seq_len(nrow(df)), function(i) {
+          row <- df[i, ]
+          card_class <- if (isTRUE(row$is_current)) "whatif-card current" else "whatif-card"
+          delta_class <- if (row$delta_percent >= 0) "delta-pos" else "delta-neg"
+
+          div(
+            class = card_class,
+            div(class = "whatif-treatment", as.character(row$treatment)),
+            div(class = "whatif-survival", sprintf("%.1f%%", as.numeric(row$survival_prob) * 100)),
+            div(class = paste("whatif-delta", delta_class), sprintf("vs current: %s", as.character(row$change_label))),
+            if (isTRUE(row$is_current)) div(class = "whatif-badge", "Current") else NULL,
+            if (as.character(row$treatment) == sim$best_treatment) div(class = "whatif-badge best", "Recommended") else NULL
+          )
+        })
+      )
+    )
+  })
+
+  output$whatif_comparison_plot <- renderPlotly({
+    sim <- what_if_simulation()
+    df <- sim$table %>% arrange(desc(survival_prob))
+    df$treatment <- factor(df$treatment, levels = df$treatment)
+
+    p <- ggplot(df, aes(x = treatment, y = survival_prob * 100, fill = is_current)) +
+      geom_col(width = 0.68, alpha = 0.95) +
+      geom_text(aes(label = sprintf("%.1f%%", survival_prob * 100)), vjust = -0.4, size = 3.8) +
+      scale_fill_manual(values = c("TRUE" = "#6EA8FE", "FALSE" = "#3DD9B4"), guide = "none") +
+      coord_cartesian(ylim = c(0, 100)) +
+      theme_minimal(base_family = "Inter") +
+      theme(
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_blank()
+      ) +
+      labs(
+        title = "What-If 5-Year Survival Comparison",
+        y = "Predicted Survival Probability (%)"
+      )
+
+    ggplotly(p, tooltip = c("x", "y")) %>% config(displayModeBar = FALSE)
   })
 
   output$best_treatment_text <- renderText({

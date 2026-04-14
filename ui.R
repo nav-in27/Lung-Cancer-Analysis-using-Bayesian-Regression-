@@ -1,5 +1,6 @@
-ui <- page_navbar(
+main_app_ui <- page_navbar(
   title = span(icon("laptop-medical"), " Bayesian Clinical Decision Support: Lung Cancer"),
+  id = "main_nav",
   theme = bs_theme(
     version = 5,
     bootswatch = "flatly",
@@ -16,6 +17,11 @@ ui <- page_navbar(
   sidebar = sidebar(
     width = 350,
     title = "Patient Parameters",
+    div(
+      class = "auth-status-wrap",
+      textOutput("welcome_user_text"),
+      actionButton("logout_btn", "Logout", class = "btn btn-outline-light btn-sm logout-btn")
+    ),
     accordion(
       accordion_panel(
         "Demographics",
@@ -45,7 +51,7 @@ ui <- page_navbar(
     actionButton("predict_btn", "Run Bayesian Inference", class = "btn-primary btn-lg w-100", icon = icon("calculator"))
   ),
   
-  nav_panel("Dashboard", icon = icon("chart-line"),
+  nav_panel("Dashboard", value = "dashboard", icon = icon("chart-line"),
     layout_columns(
       fill = FALSE,
       value_box(
@@ -98,7 +104,7 @@ ui <- page_navbar(
     )
   ),
 
-  nav_panel("Patient Monitoring", icon = icon("notes-medical"),
+  nav_panel("Patient Monitoring", value = "patient_monitoring", icon = icon("notes-medical"),
     card(
       card_header("Longitudinal Patient Monitoring Timeline"),
       layout_columns(
@@ -120,7 +126,7 @@ ui <- page_navbar(
     )
   ),
 
-  nav_panel("Treatment Simulator", icon = icon("microscope"),
+  nav_panel("Treatment Simulator", value = "treatment_simulator", icon = icon("microscope"),
     layout_columns(
       fill = FALSE,
       value_box(
@@ -165,8 +171,43 @@ ui <- page_navbar(
       uiOutput("ai_explanation_ui")
     )
   ),
+
+  nav_panel("What-If Treatment Simulator", value = "what_if_simulator", icon = icon("vials"),
+    layout_columns(
+      fill = FALSE,
+      value_box(
+        title = "Current Treatment Survival",
+        value = textOutput("whatif_current_text"),
+        p("5-year posterior survival"),
+        showcase = icon("heartbeat"),
+        theme = "secondary"
+      ),
+      value_box(
+        title = "Best Alternative",
+        value = textOutput("whatif_best_text"),
+        p("Recommended next action"),
+        showcase = icon("award"),
+        theme = "success"
+      ),
+      value_box(
+        title = "Expected Improvement",
+        value = textOutput("whatif_improvement_text"),
+        p("Against current treatment"),
+        showcase = icon("chart-line"),
+        theme = "info"
+      )
+    ),
+    card(
+      card_header("Scenario Comparison"),
+      uiOutput("whatif_cards_ui")
+    ),
+    card(
+      card_header("Treatment Scenario Survival Comparison"),
+      plotlyOutput("whatif_comparison_plot")
+    )
+  ),
   
-  nav_panel("Model Diagnostics", icon = icon("stethoscope"),
+  nav_panel("Model Diagnostics", value = "model_diagnostics", icon = icon("stethoscope"),
     card(
       card_header("MCMC Diagnostics & Uncertainty"),
       markdown("
@@ -186,13 +227,59 @@ ui <- page_navbar(
     )
   ),
   
-  nav_panel("Reports & Export", icon = icon("file-export"),
+  nav_panel("Reports & Export", value = "reports_export", icon = icon("file-export"),
     card(
       card_header("Export Patient Data & Predictions"),
       p("Generate a comprehensive PDF medical report or export the predicted posterior metrics to CSV for external clinical analysis."),
       downloadButton("export_csv", "Export Results (CSV)", class = "btn-success"),
       br(),br(),
-      downloadButton("export_pdf", "Generate Clinical Report (PDF)", class = "btn-danger")
+      uiOutput("export_pdf_ui")
     )
   )
+)
+
+login_page_ui <- fluidPage(
+  tags$head(
+    tags$link(rel = "stylesheet", type = "text/css", href = "styles.css"),
+    tags$script(HTML(
+      "
+      document.addEventListener('shiny:connected', function() {
+        try {
+          const saved = localStorage.getItem('lung_app_auth');
+          if (saved) {
+            Shiny.setInputValue('persisted_auth', JSON.parse(saved), {priority: 'event'});
+          }
+        } catch (e) {}
+      });
+
+      Shiny.addCustomMessageHandler('auth_store', function(payload) {
+        try {
+          localStorage.setItem('lung_app_auth', JSON.stringify(payload));
+        } catch (e) {}
+      });
+
+      Shiny.addCustomMessageHandler('auth_clear', function() {
+        try {
+          localStorage.removeItem('lung_app_auth');
+        } catch (e) {}
+      });
+      "
+    ))
+  ),
+  div(
+    class = "login-screen",
+    div(
+      class = "login-card fade-in-card",
+      div(class = "login-title", "Bayesian Clinical Decision Support"),
+      div(class = "login-subtitle", "Lung Cancer Analysis using Bayesian Regression"),
+      textInput("login_username", "Username"),
+      passwordInput("login_password", "Password"),
+      actionButton("login_btn", "Sign In", class = "btn-login-premium"),
+      div(class = "login-role-hint", "Doctor and Research Analyst access supported")
+    )
+  )
+)
+
+ui <- fluidPage(
+  uiOutput("app_root")
 )

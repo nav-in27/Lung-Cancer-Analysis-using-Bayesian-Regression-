@@ -65,3 +65,211 @@ body {
 .value-box-area {
     margin-bottom: 25px;
 }
+
+.login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background:
+        radial-gradient(1000px 600px at 10% 0%, rgba(0, 174, 255, 0.22), transparent 55%),
+        radial-gradient(900px 500px at 90% 100%, rgba(57, 255, 183, 0.18), transparent 58%),
+        linear-gradient(140deg, #0d1117 0%, #151c24 46%, #0f1823 100%);
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 460px;
+    border-radius: 22px;
+    padding: 30px 28px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0.08));
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    box-shadow: 0 22px 48px rgba(0, 0, 0, 0.35);
+}
+
+.fade-in-card {
+    animation: fadeSlideIn 0.8s ease-out;
+}
+
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.985);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.login-title {
+    color: #f6f8fa;
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    margin-bottom: 8px;
+}
+
+.login-subtitle {
+    color: rgba(235, 241, 248, 0.82);
+    margin-bottom: 20px;
+    font-size: 0.96rem;
+}
+
+.login-card .form-label {
+    color: rgba(241, 246, 251, 0.9);
+    font-weight: 600;
+}
+
+.login-card .form-control {
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(17, 24, 39, 0.52);
+    color: #f8fbff;
+    padding: 11px 12px;
+    margin-bottom: 14px;
+}
+
+.login-card .form-control:focus {
+    border-color: rgba(111, 207, 255, 0.85);
+    box-shadow: 0 0 0 0.22rem rgba(111, 207, 255, 0.2);
+}
+
+.btn-login-premium {
+    width: 100%;
+    margin-top: 4px;
+    border: none;
+    border-radius: 12px;
+    padding: 11px 14px;
+    color: #051424;
+    font-weight: 700;
+    background: linear-gradient(135deg, #7ad5ff 0%, #61f0c3 100%);
+    box-shadow: 0 10px 24px rgba(72, 190, 232, 0.35);
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.btn-login-premium:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 30px rgba(72, 190, 232, 0.45);
+}
+
+.login-role-hint {
+    margin-top: 14px;
+    color: rgba(222, 236, 247, 0.78);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.auth-status-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-radius: 12px;
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    color: #f8fbff;
+    background: linear-gradient(140deg, rgba(35, 48, 67, 0.92), rgba(27, 34, 48, 0.9));
+    box-shadow: 0 12px 24px rgba(26, 35, 52, 0.18);
+}
+
+.auth-status-wrap .shiny-text-output {
+    font-weight: 600;
+    font-size: 0.92rem;
+    margin: 0;
+}
+
+.logout-btn {
+    border-radius: 10px;
+    border-color: rgba(255, 255, 255, 0.35) !important;
+    color: #e9f2ff !important;
+}
+
+.whatif-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 14px;
+}
+
+.whatif-card {
+    position: relative;
+    border-radius: 14px;
+    padding: 14px;
+    border: 1px solid #e7edf4;
+    background: linear-gradient(165deg, #fbfdff, #f5f9fd);
+    box-shadow: 0 8px 22px rgba(22, 36, 52, 0.08);
+    animation: riseIn 0.45s ease;
+}
+
+.whatif-card.current {
+    border-color: #7eaefe;
+    background: linear-gradient(165deg, #f2f7ff, #eaf2ff);
+}
+
+.whatif-treatment {
+    font-weight: 700;
+    color: #1d2d44;
+    margin-bottom: 6px;
+}
+
+.whatif-survival {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #11273d;
+    margin-bottom: 4px;
+}
+
+.whatif-delta {
+    font-size: 0.88rem;
+}
+
+.delta-pos {
+    color: #118a5b;
+}
+
+.delta-neg {
+    color: #b42318;
+}
+
+.whatif-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 0.72rem;
+    padding: 3px 8px;
+    border-radius: 999px;
+    color: #16324f;
+    background: rgba(173, 208, 255, 0.5);
+}
+
+.whatif-badge.best {
+    right: 10px;
+    top: 34px;
+    color: #0a4a3b;
+    background: rgba(123, 238, 206, 0.55);
+}
+
+@keyframes riseIn {
+    from {
+        opacity: 0;
+        transform: translateY(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 640px) {
+    .login-card {
+        padding: 24px 20px;
+    }
+
+    .login-title {
+        font-size: 1.35rem;
+    }
+}

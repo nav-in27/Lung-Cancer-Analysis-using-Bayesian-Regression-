@@ -299,7 +299,8 @@ p_ppol <- ppc_dens_overlay(
 
 # ------------------------------------------------------------------------------
 # 11. PREDICTION FOR A NEW PATIENT
-# ------------------------------------------------------------------------------
+# ----------------------------------------
+--------------------------------------
 cat("\n[Clinical Application] Forward Predicting De Novo Patient Geometries...\n")
 
 # Synthetic High-Risk Profile: 70-Year-Old Male, ECOG = 2
