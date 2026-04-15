@@ -814,7 +814,7 @@ function App() {
   useEffect(() => {
     if (!auth.isLoggedIn) return;
 
-    if (auth.role === 'Doctor' && !['overview', 'simulator'].includes(activeView)) {
+    if (auth.role === 'Doctor' && !['overview', 'simulator', 'whatif'].includes(activeView)) {
       setActiveView('overview');
     }
 
@@ -908,6 +908,36 @@ function App() {
   const simulatorSorted = useMemo(() => {
     return [...treatmentSimulation].sort((a, b) => b.survival - a.survival);
   }, [treatmentSimulation]);
+
+  const whatIfScenarios = useMemo(() => {
+    if (simulatorSorted.length === 0) return [];
+
+    const currentScenario = simulatorSorted.find((row) => row.treatment === formData.treatment) || simulatorSorted[0];
+    const baselineSurvival = currentScenario?.survival ?? 0;
+
+    return simulatorSorted.map((row) => ({
+      ...row,
+      delta: row.survival - baselineSurvival,
+      isCurrent: row.treatment === currentScenario.treatment,
+      isBetter: row.survival > baselineSurvival,
+    }));
+  }, [simulatorSorted, formData.treatment]);
+
+  const currentWhatIfScenario = useMemo(() => {
+    if (whatIfScenarios.length === 0) return null;
+    return whatIfScenarios.find((row) => row.isCurrent) || whatIfScenarios[0];
+  }, [whatIfScenarios]);
+
+  const bestAlternativeScenario = useMemo(() => {
+    if (whatIfScenarios.length === 0) return null;
+    const alternatives = whatIfScenarios.filter((row) => !row.isCurrent);
+    if (alternatives.length === 0) return null;
+    return [...alternatives].sort((a, b) => b.survival - a.survival)[0];
+  }, [whatIfScenarios]);
+
+  const whatIfImprovement = bestAlternativeScenario && currentWhatIfScenario
+    ? bestAlternativeScenario.survival - currentWhatIfScenario.survival
+    : 0;
 
   const explanationFactors = useMemo(() => {
     return [...riskItems]
@@ -1065,6 +1095,15 @@ function App() {
             onClick={() => setActiveView('simulator')}
           >
             Treatment Simulator
+          </button>
+        )}
+        {canAccessDoctorFeatures && (
+          <button
+            type="button"
+            className={`view-switch-btn ${activeView === 'whatif' ? 'active' : ''}`}
+            onClick={() => setActiveView('whatif')}
+          >
+            What-If Analysis
           </button>
         )}
       </div>
@@ -1571,6 +1610,102 @@ function App() {
                   <li key={factor}>{factor}</li>
                 ))}
               </ul>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {canAccessDoctorFeatures && activeView === 'whatif' && (
+        <div className="module-shell whatif-shell">
+          <section className="panel panel-module">
+            <div className="panel-heading">
+              <h2>What-If Treatment Analysis</h2>
+              <p>Scenario comparison against the currently selected treatment</p>
+            </div>
+
+            <div className="module-grid two-col whatif-summary-grid">
+              <div className="analytic-card whatif-stat-card">
+                <div className="analytic-title">
+                  <Heart size={18} strokeWidth={1.8} />
+                  <span>Current Treatment Survival</span>
+                </div>
+                <div className="whatif-stat-value">
+                  {currentWhatIfScenario ? `${currentWhatIfScenario.survival.toFixed(1)}%` : '--'}
+                </div>
+                <div className="whatif-stat-label">
+                  {currentWhatIfScenario ? currentWhatIfScenario.treatment : 'Run a prediction to populate scenarios'}
+                </div>
+              </div>
+
+              <div className="analytic-card whatif-stat-card">
+                <div className="analytic-title">
+                  <TrendingUp size={18} strokeWidth={1.8} />
+                  <span>Best Alternative</span>
+                </div>
+                <div className="whatif-stat-value">
+                  {bestAlternativeScenario ? `${bestAlternativeScenario.survival.toFixed(1)}%` : '--'}
+                </div>
+                <div className="whatif-stat-label">
+                  {bestAlternativeScenario ? bestAlternativeScenario.treatment : 'No alternative available'}
+                </div>
+              </div>
+            </div>
+
+            <div className="analytic-card whatif-impact-card">
+              <div className="analytic-title">
+                <Sparkles size={18} strokeWidth={1.8} />
+                <span>Expected Improvement vs Current Plan</span>
+              </div>
+              <div className={`whatif-improvement ${whatIfImprovement >= 0 ? 'positive' : 'negative'}`}>
+                {whatIfImprovement >= 0 ? '+' : ''}{whatIfImprovement.toFixed(1)}%
+              </div>
+            </div>
+
+            <div className="module-grid two-col">
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <Waves size={18} strokeWidth={1.8} />
+                  <span>Scenario Survival Comparison</span>
+                </div>
+                <div className="mini-chart large">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={whatIfScenarios} margin={{ top: 10, right: 10, left: 0, bottom: 6 }}>
+                      <CartesianGrid strokeDasharray="4 5" vertical={false} stroke="#e9edf5" />
+                      <XAxis dataKey="treatment" tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} tick={{ fill: '#8b93a7', fontSize: 11 }} />
+                      <Tooltip formatter={(value) => `${Number(value).toFixed(1)}%`} />
+                      <Bar dataKey="survival" radius={[10, 10, 0, 0]}>
+                        {whatIfScenarios.map((entry) => (
+                          <Cell
+                            key={entry.treatment}
+                            fill={entry.isCurrent ? '#e67e22' : entry.isBetter ? '#2f9e44' : '#1d73ff'}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="analytic-card">
+                <div className="analytic-title">
+                  <ShieldCheck size={18} strokeWidth={1.8} />
+                  <span>Scenario Delta Table</span>
+                </div>
+                <div className="ranking-list">
+                  {whatIfScenarios.length === 0 ? (
+                    <div className="empty-note">Run AI Prediction to generate what-if scenarios.</div>
+                  ) : whatIfScenarios.map((scenario) => (
+                    <div className={`ranking-item ${scenario.isCurrent ? 'best' : ''}`} key={scenario.treatment}>
+                      <span>{scenario.treatment}</span>
+                      <strong>{scenario.survival.toFixed(1)}%</strong>
+                      <span className={`whatif-delta-chip ${scenario.delta >= 0 ? 'positive' : 'negative'}`}>
+                        {scenario.delta >= 0 ? '+' : ''}{scenario.delta.toFixed(1)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
         </div>

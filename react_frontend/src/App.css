@@ -1029,6 +1029,78 @@
   background: #effaf3;
 }
 
+.whatif-summary-grid {
+  margin-bottom: 12px;
+}
+
+.whatif-stat-card {
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.whatif-stat-value {
+  font-size: 2.25rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #162139;
+}
+
+.whatif-stat-label {
+  margin-top: 8px;
+  color: #64708a;
+  font-size: 0.95rem;
+}
+
+.whatif-impact-card {
+  margin-bottom: 16px;
+}
+
+.whatif-improvement {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+.whatif-improvement.positive {
+  color: #1f8b46;
+}
+
+.whatif-improvement.negative {
+  color: #cf3b3b;
+}
+
+.whatif-shell .ranking-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.whatif-delta-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.whatif-delta-chip.positive {
+  color: #1f8b46;
+  background: #e9f8ef;
+  border: 1px solid #c8ebd5;
+}
+
+.whatif-delta-chip.negative {
+  color: #c03a3a;
+  background: #fdeeee;
+  border: 1px solid #f7d2d2;
+}
+
 .large-gauge-wrap {
   margin-top: 6px;
 }
@@ -1398,6 +1470,19 @@
 
   .module-grid.two-col {
     grid-template-columns: 1fr;
+  }
+
+  .whatif-shell .ranking-item {
+    grid-template-columns: 1fr auto;
+  }
+
+  .whatif-shell .ranking-item strong {
+    justify-self: end;
+  }
+
+  .whatif-delta-chip {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
 
