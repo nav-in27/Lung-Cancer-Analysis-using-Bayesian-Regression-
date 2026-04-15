@@ -89,8 +89,9 @@ server <- function(input, output, session) {
 
   observe({
     req(auth$is_logged_in, auth$role)
+    role_name <- auth$role
     session$onFlushed(function() {
-      apply_role_visibility(auth$role)
+      apply_role_visibility(role_name)
     }, once = TRUE)
   })
 

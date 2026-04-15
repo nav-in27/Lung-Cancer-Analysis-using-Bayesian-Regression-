@@ -14,6 +14,25 @@ AUTH_USERS <- data.frame(
   stringsAsFactors = FALSE
 )
 
+normalize_choice <- function(value, allowed, default_value) {
+  raw <- trimws(as.character(value))
+  if (!nzchar(raw)) return(default_value)
+
+  lower_allowed <- tolower(allowed)
+  idx <- match(tolower(raw), lower_allowed)
+  if (is.na(idx)) return(default_value)
+
+  allowed[idx]
+}
+
+safe_numeric <- function(value, default_value) {
+  numeric_value <- suppressWarnings(as.numeric(value))
+  if (is.na(numeric_value)) {
+    return(default_value)
+  }
+  numeric_value
+}
+
 authenticate_user <- function(username, password, users = AUTH_USERS) {
   uname <- trimws(as.character(username))
   pword <- as.character(password)
@@ -66,17 +85,23 @@ generate_prediction <- function(age, sex, smoke, pack_years, ecog, stage,
   
   base_median <- 65 # base expected months
 
+  sex <- normalize_choice(sex, c("Male", "Female"), "Male")
+  smoke <- normalize_choice(smoke, c("Never", "Former", "Current"), "Former")
+  stage <- normalize_choice(stage, c("I", "II", "III", "IV"), "II")
+  treatment <- normalize_choice(
+    treatment,
+    c("Surgery", "Chemotherapy", "Radiation", "Immunotherapy", "Targeted Therapy", "Combination"),
+    "Chemotherapy"
+  )
+
   stage_val <- match(stage, c("I", "II", "III", "IV"))
   if (is.na(stage_val)) stage_val <- 2
 
-  ecog_num <- suppressWarnings(as.numeric(ecog))
-  if (is.na(ecog_num)) ecog_num <- 1
+  ecog_num <- safe_numeric(ecog, 1)
 
-  pack_years_num <- suppressWarnings(as.numeric(pack_years))
-  if (is.na(pack_years_num)) pack_years_num <- 0
+  pack_years_num <- safe_numeric(pack_years, 0)
 
-  genetic_num <- suppressWarnings(as.numeric(genetic_score))
-  if (is.na(genetic_num)) genetic_num <- 50
+  genetic_num <- safe_numeric(genetic_score, 50)
   genetic_num <- min(max(genetic_num, 0), 100)
 
   risk_multiplier <- 1.0 + (age - 50) * 0.015 + 
@@ -99,7 +124,8 @@ generate_prediction <- function(age, sex, smoke, pack_years, ecog, stage,
                        "Radiation" = 0.80,
                        "Immunotherapy" = 0.60,
                        "Targeted Therapy" = 0.50,
-                       "Combination" = 0.40)
+                       "Combination" = 0.40,
+                       0.85)
   
   # Simulate 4000 posterior MCMC draws for the median survival parameter
   n_draws <- 4000

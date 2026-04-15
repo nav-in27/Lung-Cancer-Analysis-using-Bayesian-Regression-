@@ -1,5 +1,10 @@
 main_app_ui <- page_navbar(
-  title = span(icon("laptop-medical"), " Bayesian Clinical Decision Support: Lung Cancer"),
+  title = span(
+    class = "brand-title-wrap",
+    icon("laptop-medical"),
+    span("Lung Cancer Clinical Intelligence", class = "brand-title"),
+    span("Bayesian Decision Platform", class = "brand-subtitle")
+  ),
   id = "main_nav",
   theme = bs_theme(
     version = 5,
@@ -12,7 +17,8 @@ main_app_ui <- page_navbar(
     heading_font = font_google("Inter")
   ),
   tags$head(
-    tags$link(rel = "stylesheet", type = "text/css", href = "styles.css")
+    tags$link(rel = "stylesheet", type = "text/css", href = "styles.css"),
+    tags$script(src = "app-motion.js")
   ),
   sidebar = sidebar(
     width = 350,
@@ -20,7 +26,7 @@ main_app_ui <- page_navbar(
     div(
       class = "auth-status-wrap",
       textOutput("welcome_user_text"),
-      actionButton("logout_btn", "Logout", class = "btn btn-outline-light btn-sm logout-btn")
+      actionButton("logout_btn", "Logout", class = "btn btn-outline-light btn-sm logout-btn ripple-btn")
     ),
     accordion(
       accordion_panel(
@@ -48,7 +54,7 @@ main_app_ui <- page_navbar(
       )
     ),
     br(),
-    actionButton("predict_btn", "Run Bayesian Inference", class = "btn-primary btn-lg w-100", icon = icon("calculator"))
+    actionButton("predict_btn", "Run Bayesian Inference", class = "btn-primary btn-lg w-100 ripple-btn", icon = icon("calculator"))
   ),
   
   nav_panel("Dashboard", value = "dashboard", icon = icon("chart-line"),
@@ -241,6 +247,7 @@ main_app_ui <- page_navbar(
 login_page_ui <- fluidPage(
   tags$head(
     tags$link(rel = "stylesheet", type = "text/css", href = "styles.css"),
+    tags$script(src = "app-motion.js"),
     tags$script(HTML(
       "
       document.addEventListener('shiny:connected', function() {
@@ -268,14 +275,42 @@ login_page_ui <- fluidPage(
   ),
   div(
     class = "login-screen",
+    div(class = "login-bg-image"),
+    div(class = "login-bg-drift"),
+    div(class = "login-bg-sweep"),
+    div(class = "login-vignette"),
+    div(class = "login-particles", id = "login_particles"),
+    div(class = "login-transition-overlay", id = "login_transition_overlay"),
     div(
-      class = "login-card fade-in-card",
-      div(class = "login-title", "Bayesian Clinical Decision Support"),
-      div(class = "login-subtitle", "Lung Cancer Analysis using Bayesian Regression"),
-      textInput("login_username", "Username"),
-      passwordInput("login_password", "Password"),
-      actionButton("login_btn", "Sign In", class = "btn-login-premium"),
-      div(class = "login-role-hint", "Doctor and Research Analyst access supported")
+      class = "login-content-wrap",
+      div(
+        class = "login-card fade-in-card motion-float",
+        div(class = "login-card-reflection"),
+        div(class = "login-kicker stagger-item", "Clinical AI Platform"),
+        div(class = "login-title stagger-item", "Lung Cancer Clinical Intelligence"),
+        div(class = "login-subtitle stagger-item", "AI-powered probabilistic survival and treatment decision system"),
+        div(
+          class = "floating-field stagger-item",
+          textInput("login_username", "Username", placeholder = " ")
+        ),
+        div(
+          class = "floating-field stagger-item",
+          passwordInput("login_password", "Password", placeholder = " ")
+        ),
+        div(
+          class = "floating-field select-field stagger-item",
+          tags$label(class = "control-label", "Role"),
+          selectInput(
+            "login_role_selector",
+            label = NULL,
+            choices = c("Doctor", "Research Analyst"),
+            selected = "Doctor"
+          )
+        ),
+        actionButton("login_btn", "Enter Clinical Portal", class = "btn-login-premium ripple-btn stagger-item"),
+        div(class = "login-role-hint stagger-item", "Doctor and Research Analyst access supported")
+      ),
+      div(class = "login-footer-reveal", "Bayesian Survival Intelligence \u2022 Secure Clinical Environment")
     )
   )
 )

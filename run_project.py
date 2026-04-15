@@ -1,5 +1,6 @@
 import os
 import argparse
+import json
 import shutil
 import socket
 import subprocess
@@ -56,8 +57,14 @@ def resolve_npm():
 
 
 def is_port_free(port, host="127.0.0.1"):
+    # First check for an active listener.
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
+        probe.settimeout(0.2)
+        if probe.connect_ex((host, port)) == 0:
+            return False
+
+    # Then verify this process can bind the port.
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError:
@@ -101,6 +108,74 @@ def wait_for_http(url, timeout_seconds, process, service_name):
     return False, f"{service_name} did not become ready in time."
 
 
+def run_backend_self_test(base_url, process):
+    tests = []
+
+    def unwrap(value):
+        if isinstance(value, list) and value:
+            return value[0]
+        return value
+
+    if process.poll() is not None:
+        return False, [{"name": "process", "ok": False, "detail": f"Backend exited with code {process.returncode}."}]
+
+    health_url = f"{base_url}/health"
+    try:
+        with request.urlopen(health_url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            status_value = unwrap(payload.get("status", ""))
+            ok = response.status == 200 and str(status_value).lower() == "ok"
+            tests.append(
+                {
+                    "name": "GET /health",
+                    "ok": ok,
+                    "detail": f"HTTP {response.status}, status={status_value}",
+                }
+            )
+    except Exception as exc:
+        tests.append({"name": "GET /health", "ok": False, "detail": str(exc)})
+
+    predict_url = f"{base_url}/predict"
+    predict_payload = {
+        "age": 65,
+        "sex": "Male",
+        "smoke": "Former",
+        "pack_years": 20,
+        "ecog": 1,
+        "stage": "II",
+        "tumor_size": 3.0,
+        "treatment": "Surgery",
+        "genetic_score": 50,
+    }
+    body = json.dumps(predict_payload).encode("utf-8")
+    predict_req = request.Request(
+        predict_url,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(predict_req, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+            prediction = payload.get("prediction", {})
+            status_value = unwrap(payload.get("status", ""))
+            median = unwrap(prediction.get("median_survival_months"))
+            ok = response.status == 200 and str(status_value).lower() == "success" and median is not None
+            tests.append(
+                {
+                    "name": "POST /predict",
+                    "ok": ok,
+                    "detail": f"HTTP {response.status}, status={status_value}, median={median}",
+                }
+            )
+    except Exception as exc:
+        tests.append({"name": "POST /predict", "ok": False, "detail": str(exc)})
+
+    passed = all(item["ok"] for item in tests)
+    return passed, tests
+
+
 def stop_process(process, name, grace_seconds=8):
     if process is None or process.poll() is not None:
         return
@@ -129,6 +204,22 @@ def build_r_env():
     return env
 
 
+def reset_database(project_root):
+    targets = [
+        project_root / "datasets_archive",
+        project_root / "data_store",
+    ]
+
+    for target in targets:
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True, exist_ok=True)
+
+    print("[SYSTEM] Database storage reset complete.", flush=True)
+    for target in targets:
+        print(f"[SYSTEM] Prepared: {target}", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run Bayesian Lung Cancer project services")
     parser.add_argument(
@@ -137,11 +228,19 @@ def main():
         default="full",
         help="'shiny' runs the Shiny dashboard (app.R); 'full' runs Plumber API + React frontend.",
     )
+    parser.add_argument(
+        "--reset-db",
+        action="store_true",
+        help="Delete and recreate local database storage folders before startup.",
+    )
     args = parser.parse_args()
 
     print("\n" + "=" * 60, flush=True)
     print(" Initializing Bayesian Lung Cancer Application", flush=True)
     print("=" * 60 + "\n", flush=True)
+
+    if args.reset_db:
+        reset_database(PROJECT_ROOT)
 
     rscript = resolve_rscript()
     if not rscript:
@@ -256,6 +355,19 @@ def main():
         if not backend_ready:
             print(f"[ERROR] {backend_error}", flush=True)
             return 1
+
+        backend_base_url = f"http://127.0.0.1:{backend_port}"
+        print("Running backend self-test before frontend startup...", flush=True)
+        tests_passed, test_results = run_backend_self_test(backend_base_url, backend_process)
+        for test in test_results:
+            marker = "PASS" if test["ok"] else "FAIL"
+            print(f"[SELFTEST] [{marker}] {test['name']} -> {test['detail']}", flush=True)
+
+        if not tests_passed:
+            print("[ERROR] Backend self-test failed. Frontend startup aborted.", flush=True)
+            return 1
+
+        print("[SELFTEST] [PASS] Backend checks completed.", flush=True)
 
         print(f"Starting React Frontend on port {frontend_port}...", flush=True)
         frontend_process = subprocess.Popen(

@@ -23,6 +23,16 @@ function(req, res) {
 #* @apiTitle Bayesian Clinical Decision Support API
 #* @apiDescription Exposing the lung cancer survival model for remote inference
 
+#* Health check endpoint
+#* @get /health
+function() {
+  list(
+    status = "ok",
+    service = "bayesian-lung-cancer-api",
+    timestamp = as.character(Sys.time())
+  )
+}
+
 #* Predict posterior survival metrics based on patient parameters
 #* @param age:numeric Patient age
 #* @param sex:character Patient sex
@@ -35,50 +45,67 @@ function(req, res) {
 #* @param genetic_score:numeric Genetic marker score
 #* @post /predict
 function(age=65, sex="Male", smoke="Former", pack_years=20, ecog=1, stage="II", tumor_size=3.0, treatment="Surgery", genetic_score=50, res) {
-  
-  # Ensure proper typecasting 
-  age <- as.numeric(age)
-  pack_years <- as.numeric(pack_years)
-  ecog <- as.character(ecog) 
-  tumor_size <- as.numeric(tumor_size)
-  genetic_score <- as.numeric(genetic_score)
-  
+
+  # Normalize user inputs to prevent invalid payloads from crashing inference.
+  age <- safe_numeric(age, NA_real_)
+  pack_years <- safe_numeric(pack_years, 0)
+  ecog <- safe_numeric(ecog, 1)
+  tumor_size <- safe_numeric(tumor_size, NA_real_)
+  genetic_score <- safe_numeric(genetic_score, 50)
+
+  sex <- normalize_choice(sex, c("Male", "Female"), "Male")
+  smoke <- normalize_choice(smoke, c("Never", "Former", "Current"), "Former")
+  stage <- normalize_choice(stage, c("I", "II", "III", "IV"), "II")
+  treatment <- normalize_choice(
+    treatment,
+    c("Surgery", "Chemotherapy", "Radiation", "Immunotherapy", "Targeted Therapy", "Combination"),
+    "Chemotherapy"
+  )
+
   if(is.na(age) || is.na(tumor_size)) {
     res$status <- 400
     return(list(error = "Invalid numerical inputs provided."))
   }
-  
-  # Core analytic wrapper
-  pred <- generate_prediction(
-    age = age,
-    sex = sex,
-    smoke = smoke,
-    pack_years = pack_years,
-    ecog = ecog,
-    stage = stage,
-    tumor_size = tumor_size,
-    treatment = treatment,
-    genetic_score = genetic_score
-  )
-  
-  # Format comprehensive JSON output
-  list(
-    status = "success",
-    timestamp = Sys.time(),
-    patient_query = list(
-      age = age, stage = stage, tumor_size = tumor_size, treatment = treatment
-    ),
-    prediction = list(
-      median_survival_months = pred$median_survival,
-      clinical_trials_ci_lower_95 = pred$ci_lower,
-      clinical_trials_ci_upper_95 = pred$ci_upper,
-      probability_survival_5y = pred$prob_surv_5y,
-      probability_mortality_5y = pred$prob_mortality_5y,
-      treatment_effectiveness_score = pred$trt_effectiveness_prob,
-      genetic_risk_modifier = pred$genetic_risk_modifier,
-      genetic_risk_shift_percent = pred$genetic_risk_shift_percent
+
+  tryCatch({
+    pred <- generate_prediction(
+      age = age,
+      sex = sex,
+      smoke = smoke,
+      pack_years = pack_years,
+      ecog = ecog,
+      stage = stage,
+      tumor_size = tumor_size,
+      treatment = treatment,
+      genetic_score = genetic_score
     )
-  )
+
+    list(
+      status = "success",
+      timestamp = as.character(Sys.time()),
+      patient_query = list(
+        age = age, sex = sex, smoke = smoke, pack_years = pack_years, ecog = ecog,
+        stage = stage, tumor_size = tumor_size, treatment = treatment, genetic_score = genetic_score
+      ),
+      prediction = list(
+        median_survival_months = pred$median_survival,
+        clinical_trials_ci_lower_95 = pred$ci_lower,
+        clinical_trials_ci_upper_95 = pred$ci_upper,
+        probability_survival_5y = pred$prob_surv_5y,
+        probability_mortality_5y = pred$prob_mortality_5y,
+        treatment_effectiveness_score = pred$trt_effectiveness_prob,
+        genetic_risk_modifier = pred$genetic_risk_modifier,
+        genetic_risk_shift_percent = pred$genetic_risk_shift_percent
+      )
+    )
+  }, error = function(e) {
+    res$status <- 500
+    list(
+      status = "error",
+      message = "Prediction engine failed.",
+      detail = as.character(e$message)
+    )
+  })
 }
 
 #* Upload dataset for model fine-tuning (CSV/Excel)
@@ -178,7 +205,9 @@ function(patient_id = "", res) {
   }
 
   subset_df <- followup_data[as.character(followup_data$patient_id) == as.character(patient_id), , drop = FALSE]
-  subset_df <- subset_df[order(subset_df$visit_date), , drop = FALSE]
+  if ("visit_date" %in% names(subset_df)) {
+    subset_df <- subset_df[order(subset_df$visit_date), , drop = FALSE]
+  }
 
   if (nrow(subset_df) == 0) {
     return(list(status = "success", patient_id = patient_id, count = 0, visits = list()))

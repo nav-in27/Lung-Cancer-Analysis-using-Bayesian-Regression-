@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import {
   Activity,
@@ -38,6 +38,14 @@ const PATIENTS_URL = `${API_BASE_URL}/patients`;
 const PATIENT_PROFILE_URL = `${API_BASE_URL}/patient_profile`;
 const FOLLOWUP_PATIENTS_URL = `${API_BASE_URL}/followup_patients`;
 const FOLLOWUP_VISITS_URL = `${API_BASE_URL}/followup_visits`;
+
+const AUTH_USERS = [
+  { username: 'doctor', password: 'doctor123', role: 'Doctor' },
+  { username: 'analyst', password: 'analyst123', role: 'Research Analyst' },
+];
+
+const AUTH_STORAGE_KEY = 'bayeslca_auth_session';
+const AUTH_ACCOUNTS_KEY = 'bayeslca_auth_accounts';
 
 const stageRiskMap = { I: 0.22, II: 0.56, III: 0.93, IV: 1.34 };
 const treatmentScoreMap = {
@@ -79,6 +87,7 @@ const asNumber = (value, fallback = 0) => {
   const numeric = Number(unwrapValue(value));
   return Number.isFinite(numeric) ? numeric : fallback;
 };
+const normalizeUsername = (value) => String(value || '').trim().toLowerCase();
 
 const SelectField = ({ id, label, value, onChange, options, icon: Icon, info }) => (
   <div className="field-block">
@@ -155,6 +164,21 @@ const MetricCard = ({ icon: Icon, label, value, suffix }) => (
 );
 
 function App() {
+  const authSceneRef = useRef(null);
+  const [auth, setAuth] = useState({
+    isLoggedIn: false,
+    username: '',
+    role: '',
+  });
+  const [authMode, setAuthMode] = useState('login');
+  const [loginForm, setLoginForm] = useState({ username: '', password: '', role: 'Doctor' });
+  const [registerForm, setRegisterForm] = useState({ username: '', password: '', confirmPassword: '', role: 'Doctor' });
+  const [customAccounts, setCustomAccounts] = useState([]);
+  const [loginError, setLoginError] = useState('');
+  const [registerError, setRegisterError] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+
   const [formData, setFormData] = useState({
     age: 62,
     sex: 'Male',
@@ -182,6 +206,10 @@ function App() {
   const [followupVisits, setFollowupVisits] = useState([]);
   const [treatmentSimulation, setTreatmentSimulation] = useState([]);
 
+  const canAccessDoctorFeatures = auth.role === 'Doctor';
+  const canAccessAnalystFeatures = auth.role === 'Research Analyst';
+  const allAuthUsers = useMemo(() => [...AUTH_USERS, ...customAccounts], [customAccounts]);
+
   const handleChange = (event) => {
     const { id, value, type } = event.target;
     const shouldParseNumber = type === 'number' || type === 'range';
@@ -189,6 +217,208 @@ function App() {
       ...prev,
       [id]: shouldParseNumber ? Number(value) : value,
     }));
+  };
+
+  const handleLoginChange = (event) => {
+    const { id, value } = event.target;
+    setLoginForm((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleRegisterChange = (event) => {
+    const { id, value } = event.target;
+    const fieldMap = {
+      register_username: 'username',
+      register_password: 'password',
+      confirmPassword: 'confirmPassword',
+      register_role: 'role',
+    };
+
+    const targetField = fieldMap[id] || id;
+    setRegisterForm((prev) => ({ ...prev, [targetField]: value }));
+  };
+
+  const beginAuthTransition = () => {
+    const scene = authSceneRef.current;
+    if (!scene) return;
+    scene.classList.add('is-auth-submitting');
+  };
+
+  const endAuthTransition = () => {
+    const scene = authSceneRef.current;
+    if (!scene) return;
+    scene.classList.remove('is-auth-submitting');
+  };
+
+  const handleLogin = (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    beginAuthTransition();
+
+    const username = normalizeUsername(loginForm.username);
+    const password = String(loginForm.password || '');
+    const role = String(loginForm.role || 'Doctor');
+
+    const matched = allAuthUsers.find((user) => {
+      return user.username === username && user.password === password && user.role === role;
+    });
+
+    if (!matched) {
+      setLoginError('Invalid username, password, or role.');
+      setAuthBusy(false);
+      endAuthTransition();
+      return;
+    }
+
+    const nextAuth = {
+      isLoggedIn: true,
+      username: matched.username,
+      role: matched.role,
+    };
+
+    setAuth(nextAuth);
+    setLoginError('');
+    setLoginForm({ username: matched.username, password: '', role: matched.role });
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+    setTimeout(() => {
+      setAuthBusy(false);
+      endAuthTransition();
+    }, 420);
+  };
+
+  const handleCreateAccount = (event) => {
+    event.preventDefault();
+    setRegisterError('');
+    setRegisterSuccess('');
+
+    const username = normalizeUsername(registerForm.username);
+    const password = String(registerForm.password || '');
+    const confirmPassword = String(registerForm.confirmPassword || '');
+    const role = String(registerForm.role || 'Doctor');
+
+    if (!username || username.length < 3) {
+      setRegisterError('Username must be at least 3 characters.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setRegisterError('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setRegisterError('Password and confirm password must match.');
+      return;
+    }
+
+    if (allAuthUsers.some((user) => user.username === username)) {
+      setRegisterError('Username already exists. Choose another username.');
+      return;
+    }
+
+    setAuthBusy(true);
+    beginAuthTransition();
+
+    const createdAccount = {
+      username,
+      password,
+      role,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextAccounts = [...customAccounts, createdAccount];
+    setCustomAccounts(nextAccounts);
+    localStorage.setItem(AUTH_ACCOUNTS_KEY, JSON.stringify(nextAccounts));
+
+    const nextAuth = {
+      isLoggedIn: true,
+      username,
+      role,
+    };
+
+    setAuth(nextAuth);
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+    setRegisterForm({ username: '', password: '', confirmPassword: '', role: 'Doctor' });
+    setRegisterSuccess('Account created and signed in successfully.');
+
+    setTimeout(() => {
+      setAuthBusy(false);
+      endAuthTransition();
+    }, 480);
+  };
+
+  const handleLogout = () => {
+    setAuth({ isLoggedIn: false, username: '', role: '' });
+    setLoginForm({ username: '', password: '', role: 'Doctor' });
+    setLoginError('');
+    setRegisterError('');
+    setRegisterSuccess('');
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  };
+
+  const downloadBlob = (content, filename, mimeType) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportCsvReport = () => {
+    if (!prediction) return;
+
+    const rows = [
+      ['Username', auth.username],
+      ['Role', auth.role],
+      ['Age', formData.age],
+      ['Sex', formData.sex],
+      ['Smoking Status', formData.smoke],
+      ['Pack Years', formData.pack_years],
+      ['ECOG', formData.ecog],
+      ['Cancer Stage', formData.stage],
+      ['Tumor Size', formData.tumor_size],
+      ['Treatment', formData.treatment],
+      ['Genetic Marker Score', formData.genetic_score],
+      ['Median Survival Months', Number(prediction.median_survival_months || 0).toFixed(2)],
+      ['Lower 95 CI', Number(prediction.clinical_trials_ci_lower_95 || 0).toFixed(2)],
+      ['Upper 95 CI', Number(prediction.clinical_trials_ci_upper_95 || 0).toFixed(2)],
+      ['Survival Probability 5Y', Number((prediction.probability_survival_5y || 0) * 100).toFixed(2)],
+      ['Mortality Probability 5Y', Number((prediction.probability_mortality_5y || 0) * 100).toFixed(2)],
+    ];
+
+    const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(',')).join('\n');
+    downloadBlob(csv, `BayesLCA_Analyst_Report_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8;');
+  };
+
+  const exportDoctorSummary = () => {
+    if (!prediction) return;
+
+    const report = [
+      'BayesLCA Clinical Report',
+      `Date: ${new Date().toLocaleString()}`,
+      `Welcome Dr. ${auth.username}`,
+      '',
+      'Patient Inputs',
+      `Age: ${formData.age}`,
+      `Sex: ${formData.sex}`,
+      `Smoking Status: ${formData.smoke}`,
+      `Pack Years: ${formData.pack_years}`,
+      `ECOG: ${formData.ecog}`,
+      `Stage: ${formData.stage}`,
+      `Tumor Size: ${formData.tumor_size} cm`,
+      `Treatment: ${formData.treatment}`,
+      `Genetic Marker Score: ${formData.genetic_score}`,
+      '',
+      'Prediction Summary',
+      `Median Survival: ${Number(prediction.median_survival_months || 0).toFixed(1)} months`,
+      `95% Credible Interval: ${Number(prediction.clinical_trials_ci_lower_95 || 0).toFixed(1)} - ${Number(prediction.clinical_trials_ci_upper_95 || 0).toFixed(1)} months`,
+      `5-Year Survival Probability: ${formatPercent((prediction.probability_survival_5y || 0) * 100)}`,
+    ].join('\n');
+
+    downloadBlob(report, `BayesLCA_Doctor_Report_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain;charset=utf-8;');
   };
 
   const normalizePrediction = (rawPrediction, geneticScore) => {
@@ -444,11 +674,87 @@ function App() {
   };
 
   useEffect(() => {
+    if (!auth.isLoggedIn) return;
     runPrediction();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isLoggedIn]);
+
+  useEffect(() => {
+    try {
+      const savedAccounts = localStorage.getItem(AUTH_ACCOUNTS_KEY);
+      if (!savedAccounts) return;
+
+      const parsedAccounts = JSON.parse(savedAccounts);
+      if (!Array.isArray(parsedAccounts)) return;
+
+      const sanitized = parsedAccounts
+        .map((entry) => ({
+          username: normalizeUsername(entry?.username),
+          password: String(entry?.password || ''),
+          role: entry?.role === 'Research Analyst' ? 'Research Analyst' : 'Doctor',
+        }))
+        .filter((entry) => entry.username && entry.password);
+
+      setCustomAccounts(sanitized);
+    } catch {
+      // Ignore malformed custom account payloads.
+    }
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!saved) return;
+
+      const parsed = JSON.parse(saved);
+      const normalizedUsername = normalizeUsername(parsed.username);
+      const isValid = allAuthUsers.some((user) => user.username === normalizedUsername && user.role === parsed.role);
+      if (!isValid) return;
+
+      setAuth({
+        isLoggedIn: true,
+        username: normalizedUsername,
+        role: parsed.role,
+      });
+    } catch {
+      // No-op on invalid local storage payload.
+    }
+  }, [allAuthUsers]);
+
+  useEffect(() => {
+    if (auth.isLoggedIn) return undefined;
+
+    const scene = authSceneRef.current;
+    if (!scene) return undefined;
+
+    const setVars = (x, y, scrollY) => {
+      scene.style.setProperty('--auth-pointer-x', `${x}px`);
+      scene.style.setProperty('--auth-pointer-y', `${y}px`);
+      scene.style.setProperty('--auth-scroll-y', `${scrollY}px`);
+    };
+
+    const handleMove = (event) => {
+      const x = (event.clientX / window.innerWidth - 0.5) * 34;
+      const y = (event.clientY / window.innerHeight - 0.5) * 26;
+      setVars(x, y, window.scrollY || 0);
+    };
+
+    const handleScroll = () => {
+      setVars(0, 0, window.scrollY || 0);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [auth.isLoggedIn]);
+
+  useEffect(() => {
+    if (!auth.isLoggedIn) return;
     const fetchAllPatientIds = async () => {
       try {
         const response = await axios.get(PATIENTS_URL);
@@ -463,9 +769,10 @@ function App() {
     };
 
     fetchAllPatientIds();
-  }, []);
+  }, [auth.isLoggedIn]);
 
   useEffect(() => {
+    if (!auth.isLoggedIn) return;
     const fetchPatients = async () => {
       try {
         const response = await axios.get(FOLLOWUP_PATIENTS_URL);
@@ -480,9 +787,10 @@ function App() {
     };
 
     fetchPatients();
-  }, []);
+  }, [auth.isLoggedIn]);
 
   useEffect(() => {
+    if (!auth.isLoggedIn) return;
     if (!selectedPatientId) {
       setFollowupVisits([]);
       return;
@@ -501,7 +809,19 @@ function App() {
     };
 
     fetchVisits();
-  }, [selectedPatientId]);
+  }, [selectedPatientId, auth.isLoggedIn]);
+
+  useEffect(() => {
+    if (!auth.isLoggedIn) return;
+
+    if (auth.role === 'Doctor' && !['overview', 'simulator'].includes(activeView)) {
+      setActiveView('overview');
+    }
+
+    if (auth.role === 'Research Analyst' && activeView !== 'overview') {
+      setActiveView('overview');
+    }
+  }, [auth, activeView]);
 
   const survivalProbability = prediction ? prediction.probability_survival_5y * 100 : 0;
   const mortalityProbability = prediction ? prediction.probability_mortality_5y * 100 : 0;
@@ -596,6 +916,108 @@ function App() {
       .map((item) => item.label);
   }, [riskItems]);
 
+  if (!auth.isLoggedIn) {
+    return (
+      <div className="auth-screen auth-cinematic" ref={authSceneRef}>
+        <div className="auth-bg-layer auth-bg-image" />
+        <div className="auth-bg-layer auth-bg-drift" />
+        <div className="auth-bg-layer auth-bg-sweep" />
+        <div className="auth-bg-layer auth-vignette" />
+        <div className="auth-particles" aria-hidden="true">
+          <span className="auth-particle p1" />
+          <span className="auth-particle p2" />
+          <span className="auth-particle p3" />
+          <span className="auth-particle p4" />
+          <span className="auth-particle p5" />
+          <span className="auth-particle p6" />
+        </div>
+
+        <div className="auth-content-wrap">
+          <div className="auth-card cinematic-card">
+            <div className="auth-reflection" />
+            <div className="auth-kicker">Clinical AI Platform</div>
+            <div className="auth-title">Lung Cancer Clinical Intelligence</div>
+            <div className="auth-subtitle">AI-powered probabilistic survival and treatment decision system</div>
+
+            <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
+              <button
+                type="button"
+                className={`auth-tab ${authMode === 'login' ? 'active' : ''}`}
+                onClick={() => {
+                  setAuthMode('login');
+                  setRegisterError('');
+                  setRegisterSuccess('');
+                }}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className={`auth-tab ${authMode === 'register' ? 'active' : ''}`}
+                onClick={() => {
+                  setAuthMode('register');
+                  setLoginError('');
+                }}
+              >
+                Create Account
+              </button>
+            </div>
+
+            {authMode === 'login' ? (
+              <form className="auth-form" onSubmit={handleLogin}>
+                <label htmlFor="username">Username</label>
+                <input id="username" type="text" value={loginForm.username} onChange={handleLoginChange} placeholder=" " autoComplete="username" />
+
+                <label htmlFor="password">Password</label>
+                <input id="password" type="password" value={loginForm.password} onChange={handleLoginChange} placeholder=" " autoComplete="current-password" />
+
+                <label htmlFor="role">Role</label>
+                <select id="role" value={loginForm.role} onChange={handleLoginChange} className="auth-select">
+                  <option value="Doctor">Doctor</option>
+                  <option value="Research Analyst">Research Analyst</option>
+                </select>
+
+                {loginError ? <div className="auth-error">{loginError}</div> : null}
+                <button type="submit" className={`auth-login-btn ${authBusy ? 'is-loading' : ''}`}>
+                  <span className="btn-label">Enter Clinical Portal</span>
+                  <span className="btn-spinner" aria-hidden="true" />
+                </button>
+                <div className="auth-hint">Doctor and Research Analyst access enabled</div>
+              </form>
+            ) : (
+              <form className="auth-form" onSubmit={handleCreateAccount}>
+                <label htmlFor="register_username">Create Username</label>
+                <input id="register_username" type="text" value={registerForm.username} onChange={handleRegisterChange} placeholder=" " autoComplete="username" />
+
+                <label htmlFor="register_password">Create Password</label>
+                <input id="register_password" type="password" value={registerForm.password} onChange={handleRegisterChange} placeholder=" " autoComplete="new-password" />
+
+                <label htmlFor="confirmPassword">Confirm Password</label>
+                <input id="confirmPassword" type="password" value={registerForm.confirmPassword} onChange={handleRegisterChange} placeholder=" " autoComplete="new-password" />
+
+                <label htmlFor="register_role">Role</label>
+                <select id="register_role" value={registerForm.role} onChange={handleRegisterChange} className="auth-select">
+                  <option value="Doctor">Doctor</option>
+                  <option value="Research Analyst">Research Analyst</option>
+                </select>
+
+                {registerError ? <div className="auth-error">{registerError}</div> : null}
+                {registerSuccess ? <div className="auth-success">{registerSuccess}</div> : null}
+
+                <button type="submit" className={`auth-login-btn ${authBusy ? 'is-loading' : ''}`}>
+                  <span className="btn-label">Create and Enter Portal</span>
+                  <span className="btn-spinner" aria-hidden="true" />
+                </button>
+                <div className="auth-hint">New accounts are stored locally on this device.</div>
+              </form>
+            )}
+          </div>
+          <div className="auth-footer-reveal">Bayesian Survival Intelligence - Secure Clinical Environment</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
       <div className="ambient ambient-one" />
@@ -612,7 +1034,15 @@ function App() {
         </div>
 
         <div className="topbar-meta">
-          <span>BayesLCA Clinical Intelligence</span>
+          <span>Welcome Dr. {auth.username}</span>
+          <span className="role-chip">{auth.role}</span>
+          {(canAccessAnalystFeatures || canAccessDoctorFeatures) && prediction ? (
+            <button type="button" className="export-btn" onClick={exportCsvReport}>Export CSV</button>
+          ) : null}
+          {canAccessDoctorFeatures && prediction ? (
+            <button type="button" className="export-btn doctor" onClick={exportDoctorSummary}>Export Report</button>
+          ) : null}
+          <button type="button" className="logout-btn" onClick={handleLogout}>Logout</button>
           <div className={`live-pill ${apiStatus}`}>
             <span className="live-dot" />
             {apiStatusText}
@@ -628,20 +1058,15 @@ function App() {
         >
           Overview
         </button>
-        <button
-          type="button"
-          className={`view-switch-btn ${activeView === 'monitoring' ? 'active' : ''}`}
-          onClick={() => setActiveView('monitoring')}
-        >
-          Patient Monitoring
-        </button>
-        <button
-          type="button"
-          className={`view-switch-btn ${activeView === 'simulator' ? 'active' : ''}`}
-          onClick={() => setActiveView('simulator')}
-        >
-          Treatment Simulator
-        </button>
+        {canAccessDoctorFeatures && (
+          <button
+            type="button"
+            className={`view-switch-btn ${activeView === 'simulator' ? 'active' : ''}`}
+            onClick={() => setActiveView('simulator')}
+          >
+            Treatment Simulator
+          </button>
+        )}
       </div>
 
       {activeView === 'overview' && (
@@ -944,7 +1369,7 @@ function App() {
       </div>
       )}
 
-      {activeView === 'monitoring' && (
+      {canAccessDoctorFeatures && activeView === 'monitoring' && (
         <div className="module-shell monitoring-shell">
           <section className="panel panel-module">
             <div className="panel-heading">
@@ -1050,7 +1475,7 @@ function App() {
         </div>
       )}
 
-      {activeView === 'simulator' && (
+      {canAccessDoctorFeatures && activeView === 'simulator' && (
         <div className="module-shell simulator-shell">
           <section className="panel panel-module">
             <div className="panel-heading">
